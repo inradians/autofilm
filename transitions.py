@@ -99,39 +99,70 @@ SHORTCLIP_TRANSITION_CAP = 0.40
 # ============================================================================
 
 def transition_names() -> list[str]:
-    """Public list of valid transition type names (for JSON-schema enums)."""
-    return list(TRANSITIONS.keys())
+    """Public list of valid transition type names (for JSON-schema enums).
+
+    Includes both the built-in ffmpeg-xfade catalog and any GLSL
+    transitions registered via ``register_glsl_transition()``.
+    """
+    return list(TRANSITIONS.keys()) + list(GLSL_TRANSITIONS.keys())
 
 
 def validate_transition(t: dict | None) -> dict:
     """Coerce a (possibly missing or malformed) transition dict into a
-    well-formed `{type, duration, xfade, desc}` record. Unknown types
-    fall back to `cut` rather than raising — pipeline robustness over
-    strict validation, since this runs on agent-produced JSON.
+    well-formed ``{type, duration, xfade, glsl, desc}`` record. Unknown
+    types fall back to ``cut`` rather than raising — pipeline robustness
+    over strict validation, since this runs on agent-produced JSON.
+
+    Looks up ``type`` in ``TRANSITIONS`` (ffmpeg-xfade catalog) first,
+    then in ``GLSL_TRANSITIONS`` (custom shader registry, populated by
+    ``register_glsl_transition``). GLSL entries return a dict with
+    ``glsl`` populated and ``xfade`` set to ``None``; the renderer
+    branches on which is present.
     """
     if not t or not isinstance(t, dict):
         return _cut()
     name = str(t.get("type", "cut")).strip()
-    if name not in TRANSITIONS:
-        return _cut()
     if name == "cut":
         return _cut()
-    raw_dur = t.get("duration", DEFAULT_DURATION)
+    if name in TRANSITIONS:
+        meta = TRANSITIONS[name]
+        is_glsl = False
+    elif name in GLSL_TRANSITIONS:
+        meta = GLSL_TRANSITIONS[name]
+        is_glsl = True
+    else:
+        return _cut()
+    raw_dur = t.get("duration", meta.get("default_duration", DEFAULT_DURATION))
     try:
         dur = float(raw_dur)
     except (TypeError, ValueError):
         dur = DEFAULT_DURATION
     dur = max(MIN_NONCUT_DURATION, min(MAX_DURATION, dur))
+    if is_glsl:
+        return {
+            "type":     name,
+            "duration": dur,
+            "xfade":    None,
+            "glsl":     meta["shader"],
+            "desc":     meta["desc"],
+        }
     return {
         "type":     name,
         "duration": dur,
-        "xfade":    TRANSITIONS[name]["xfade"],
-        "desc":     TRANSITIONS[name]["desc"],
+        "xfade":    meta["xfade"],
+        "glsl":     None,
+        "desc":     meta["desc"],
     }
 
 
 def _cut() -> dict:
-    return {"type": "cut", "duration": 0.0, "xfade": None, "desc": TRANSITIONS["cut"]["desc"]}
+    return {
+        "type":     "cut",
+        "duration": 0.0,
+        "xfade":    None,
+        "glsl":     None,
+        "desc":     TRANSITIONS["cut"]["desc"],
+    }
 
 
 def clamp_for_clip_durations(t: dict, left_dur: float, right_dur: float) -> dict:
@@ -160,6 +191,14 @@ def prompt_guidance() -> str:
     ]
     for name, meta in TRANSITIONS.items():
         lines.append(f"  - `{name}` — {meta['desc']}")
+    if GLSL_TRANSITIONS:
+        lines += [
+            "",
+            "Custom GLSL shader transitions (slower than ffmpeg ones — use sparingly):",
+            "",
+        ]
+        for name, meta in GLSL_TRANSITIONS.items():
+            lines.append(f"  - `{name}` — {meta['desc']}  *(GLSL)*")
     lines += [
         "",
         f"Default is `cut` (hard cut, no overlap). When you do specify a",
@@ -248,6 +287,13 @@ def _build_filter_complex(
 
     # Step 2 — chain the xfades. After each xfade the running stream is
     # named v01, v02, ... vNN_out for video and similarly for audio.
+    #
+    # We use xfade for EVERY pair, even hard cuts. Cuts are encoded as a
+    # 1-frame (1/fps) fade — visually indistinguishable from a hard cut
+    # at 24fps but keeping the filter graph homogeneous. Mixing xfade
+    # with concat in a single graph fails because concat outputs at
+    # timebase 1/1000000 while xfade wants 1/fps.
+    cut_duration = 1.0 / float(fps)
     last_v = "v0"
     last_a = "a0"
     output_so_far = durations[0]
@@ -259,29 +305,27 @@ def _build_filter_complex(
         out_a = "aout" if is_last else f"ax{i + 1:02d}"
 
         if clamped["xfade"] is None:
-            # Cut: concat the two streams head-to-tail. We keep using
-            # filter_complex so the rest of the chain stays uniform.
-            parts.append(
-                f"[{last_v}][v{i + 1}]concat=n=2:v=1:a=0[{out_v}]"
-            )
-            parts.append(
-                f"[{last_a}][a{i + 1}]concat=n=2:v=0:a=1[{out_a}]"
-            )
-            output_so_far = output_so_far + durations[i + 1]
+            # Hard cut: use a 1-frame fade. Visually identical to a cut
+            # at this fps, but keeps the filter graph all-xfade so the
+            # timebases stay consistent.
+            xfade_name = "fade"
+            xfade_duration = cut_duration
         else:
-            offset = output_so_far - clamped["duration"]
-            # Floor offset at 0 in case of rounding / very short first clip.
-            offset = max(0.0, offset)
-            parts.append(
-                f"[{last_v}][v{i + 1}]"
-                f"xfade=transition={clamped['xfade']}"
-                f":duration={clamped['duration']:.3f}:offset={offset:.3f}[{out_v}]"
-            )
-            parts.append(
-                f"[{last_a}][a{i + 1}]"
-                f"acrossfade=d={clamped['duration']:.3f}[{out_a}]"
-            )
-            output_so_far = output_so_far + durations[i + 1] - clamped["duration"]
+            xfade_name = clamped["xfade"]
+            xfade_duration = clamped["duration"]
+
+        offset = output_so_far - xfade_duration
+        offset = max(0.0, offset)
+        parts.append(
+            f"[{last_v}][v{i + 1}]"
+            f"xfade=transition={xfade_name}"
+            f":duration={xfade_duration:.4f}:offset={offset:.4f}[{out_v}]"
+        )
+        parts.append(
+            f"[{last_a}][a{i + 1}]"
+            f"acrossfade=d={xfade_duration:.4f}[{out_a}]"
+        )
+        output_so_far = output_so_far + durations[i + 1] - xfade_duration
 
         last_v = out_v
         last_a = out_a
@@ -343,6 +387,15 @@ def render_clips_with_transitions(
         transitions = list(transitions) + [{"type": "cut"} for _ in range(n_trans - len(transitions))]
     transitions = [validate_transition(t) for t in transitions[:n_trans]]
 
+    # GLSL routing: if any transition uses a custom shader, switch to
+    # pairwise rendering. The single-filter-graph fast path can't hold
+    # custom shader stages.
+    if _any_glsl(transitions):
+        return _render_pairwise(
+            clip_paths, transitions, output_path,
+            fps=fps, width=width, height=height, bitrate=bitrate,
+        )
+
     # Probe each clip's duration. Required for xfade offset math.
     durations = [_ffprobe_duration(Path(p)) for p in clip_paths]
 
@@ -387,3 +440,429 @@ def any_non_cut(transitions: list[dict]) -> bool:
     Lets compile_final fast-path the common case (everything's a cut →
     use moviepy's existing concatenate, no re-encode)."""
     return any(t.get("type", "cut") != "cut" for t in transitions)
+
+
+# ============================================================================
+# OPTIONAL GLSL EXTENSION
+# ============================================================================
+# Custom transitions written as fragment shaders following the
+# gl-transitions.com convention. *Opt-in* — an experiment only pays the
+# moderngl import cost and slower pairwise rendering when the agent
+# actually uses a GLSL transition. The default catalog stays
+# ffmpeg-xfade only.
+#
+# The original module-level note (top of file) argued against GLSL on
+# dependency-cost grounds, and that argument still applies for the 90%
+# case. This extension exists for the 10% case: chromatic aberration,
+# displacement maps, custom warps — things xfade can't express. Use it
+# deliberately, not by default.
+
+GLSL_TRANSITIONS: dict[str, dict[str, Any]] = {}
+"""Registry of GLSL transitions. Populated by ``register_glsl_transition``."""
+
+
+def register_glsl_transition(
+    name: str,
+    shader: str,
+    *,
+    default_duration: float = 1.0,
+    desc: str = "",
+) -> None:
+    """Register a custom transition implemented as a fragment shader.
+
+    Args:
+        name: storyboard-visible name (e.g. ``"chromatic_glitch"``). Must
+            not collide with an ffmpeg-xfade entry; collisions raise.
+        shader: a gl-transitions style fragment-shader BODY. Must define a
+            ``vec4 transition(vec2 uv)`` function. The harness adds
+            ``#version 330``, the uniforms (``from``, ``to``, ``progress``,
+            ``ratio``), a ``texture2D`` macro, a ``random()`` helper, and
+            the ``main()`` wrapper — don't redeclare any of those.
+        default_duration: seconds; used when storyboards omit ``duration``.
+            Same clamping rules apply as for ffmpeg transitions.
+        desc: short editorial description, surfaced in the bible and in
+            the SHOTLIST_SYSTEM prompt guidance.
+    """
+    if name in TRANSITIONS:
+        raise ValueError(
+            f"GLSL transition name '{name}' collides with an ffmpeg-xfade "
+            f"entry. Pick a different name."
+        )
+    GLSL_TRANSITIONS[name] = {
+        "shader":           shader,
+        "default_duration": float(default_duration),
+        "desc":             desc or f"Custom GLSL transition ({name})",
+    }
+
+
+def _any_glsl(transitions: list[dict]) -> bool:
+    return any(t.get("glsl") for t in transitions)
+
+
+# ----- Default GLSL transitions shipped out of the box ---------------------
+# Follow the gl-transitions.com convention. Agents can add more by
+# calling register_glsl_transition() from produce.py with their own
+# shader source — the registration goes into the experiment's produce.py
+# snapshot so it's reproducible.
+
+_GLSL_CHROMATIC_GLITCH = """
+// RGB-split glitch dissolve. Shifts R and B channels horizontally with
+// rising amplitude through the middle of the transition, then settles.
+// Reads as a digital intrusion / signal-loss / surveillance-camera moment.
+vec4 transition(vec2 uv) {
+    float p = progress;
+    float bell = sin(p * 3.14159);                 // 0 at edges, 1 in middle
+    float jitter = (random(uv + vec2(p, 0.0)) - 0.5) * 0.06 * bell;
+    vec2 r_uv = uv + vec2(jitter,  0.0);
+    vec2 b_uv = uv + vec2(-jitter, 0.0);
+    float r = mix(texture2D(from, r_uv).r, texture2D(to, r_uv).r, p);
+    float g = mix(texture2D(from, uv  ).g, texture2D(to, uv  ).g, p);
+    float b = mix(texture2D(from, b_uv).b, texture2D(to, b_uv).b, p);
+    return vec4(r, g, b, 1.0);
+}
+"""
+
+_GLSL_DISPLACEMENT_PUSH = """
+// Displacement-mapped push. The luminance of `from` drives a per-pixel
+// displacement of `to`'s sample coordinate, so bright pixels of A push
+// B's image around as B fades in. Reads as a "dissolution" — good for
+// memory beats or fluid POV transitions.
+vec4 transition(vec2 uv) {
+    float p = progress;
+    vec3 ref = texture2D(from, uv).rgb;
+    float disp = (ref.r + ref.g + ref.b) / 3.0;     // luminance proxy
+    vec2 dir = vec2(disp - 0.5, disp - 0.5) * 0.15 * p;
+    vec4 a = texture2D(from, uv);
+    vec4 b = texture2D(to,   uv + dir);
+    return mix(a, b, smoothstep(0.0, 1.0, p));
+}
+"""
+
+register_glsl_transition(
+    "chromatic_glitch",
+    _GLSL_CHROMATIC_GLITCH,
+    default_duration=0.8,
+    desc="RGB-split glitch dissolve. Use for digital intrusion / signal-loss beats.",
+)
+register_glsl_transition(
+    "displacement_push",
+    _GLSL_DISPLACEMENT_PUSH,
+    default_duration=1.0,
+    desc="Luminance-driven displacement push. Use for memory or fluid POV shifts.",
+)
+
+
+# ----- GLSL renderer (moderngl + ffmpeg piping) ----------------------------
+# Headless via the EGL backend — no X server required. Falls back to the
+# default standalone backend if EGL isn't available. Per-frame: upload
+# both source frames as textures, set ``progress``, render to FBO, read
+# back. Roughly real-time at 720p on llvmpipe; effectively instant on a
+# real GPU.
+
+_GLSL_VERTEX = """
+#version 330
+in vec2 in_pos;
+in vec2 in_uv;
+out vec2 v_uv;
+void main() {
+    v_uv = in_uv;
+    gl_Position = vec4(in_pos, 0.0, 1.0);
+}
+"""
+
+_GLSL_FRAGMENT_TEMPLATE = """
+#version 330
+in vec2 v_uv;
+out vec4 fragColor;
+
+uniform sampler2D from;
+uniform sampler2D to;
+uniform float progress;
+uniform float ratio;
+
+#define texture2D texture
+
+float random(vec2 co) {
+    return fract(sin(dot(co.xy, vec2(12.9898, 78.233))) * 43758.5453);
+}
+
+%USER_BODY%
+
+void main() {
+    fragColor = transition(v_uv);
+}
+"""
+
+
+def _read_video_frames(path: Path, ss: float, t: float, w: int, h: int, fps: int) -> bytes:
+    """Read [ss, ss+t] of `path`, scaled to WxH at `fps`, as rgb24 bytes."""
+    cmd = [
+        "ffmpeg", "-loglevel", "error",
+        "-ss", f"{ss:.3f}", "-t", f"{t:.3f}",
+        "-i", str(path),
+        "-vf", f"scale={w}:{h}:flags=bilinear,fps={fps}",
+        "-f", "rawvideo", "-pix_fmt", "rgb24", "-",
+    ]
+    return subprocess.run(cmd, capture_output=True, check=True).stdout
+
+
+def _write_rgb24_video(buf: bytes, w: int, h: int, fps: int, out: Path) -> None:
+    cmd = [
+        "ffmpeg", "-y", "-loglevel", "error",
+        "-f", "rawvideo", "-pix_fmt", "rgb24",
+        "-s", f"{w}x{h}", "-r", str(fps),
+        "-i", "-",
+        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast",
+        str(out),
+    ]
+    subprocess.run(cmd, input=buf, check=True)
+
+
+def _has_audio_stream(path: Path) -> bool:
+    r = subprocess.run(
+        [
+            "ffprobe", "-v", "error",
+            "-select_streams", "a",
+            "-show_entries", "stream=codec_type",
+            "-of", "json",
+            str(path),
+        ],
+        capture_output=True, text=True, check=True,
+    )
+    return bool(json.loads(r.stdout).get("streams"))
+
+
+def _concat_files(clips: list[Path], out: Path, *, width: int, height: int, fps: int) -> Path:
+    """Re-encoding concat with WxH/fps normalization. Used by the GLSL
+    pairwise renderer to glue (head_a, transition, tail_b) together and
+    to handle plain cuts on the GLSL pairwise path."""
+    if len(clips) == 1:
+        shutil.copy(str(clips[0]), str(out))
+        return out
+    n = len(clips)
+    have_audio = all(_has_audio_stream(c) for c in clips)
+    parts: list[str] = []
+    for i in range(n):
+        parts.append(
+            f"[{i}:v]scale={width}:{height}:force_original_aspect_ratio=decrease,"
+            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black,"
+            f"setsar=1,fps={fps},format=yuv420p[v{i}]"
+        )
+        if have_audio:
+            parts.append(
+                f"[{i}:a]aformat=sample_fmts=fltp:channel_layouts=stereo:sample_rates=48000[a{i}]"
+            )
+    if have_audio:
+        parts.append("".join(f"[v{i}][a{i}]" for i in range(n)) + f"concat=n={n}:v=1:a=1[v][a]")
+        maps = ["-map", "[v]", "-map", "[a]"]
+    else:
+        parts.append("".join(f"[v{i}]" for i in range(n)) + f"concat=n={n}:v=1:a=0[v]")
+        maps = ["-map", "[v]"]
+    inputs: list[str] = []
+    for c in clips:
+        inputs += ["-i", str(c)]
+    cmd = [
+        "ffmpeg", "-y", "-loglevel", "error",
+        *inputs,
+        "-filter_complex", ";".join(parts),
+        *maps,
+        "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-b:a", "192k",
+        str(out),
+    ]
+    subprocess.run(cmd, check=True)
+    return out
+
+
+def _render_glsl_pair(
+    a: Path,
+    b: Path,
+    shader_body: str,
+    duration: float,
+    out: Path,
+    *,
+    width: int,
+    height: int,
+    fps: int,
+) -> Path:
+    """Render the GLSL transition between A's tail and B's head, mux audio
+    crossfade onto the result, then concat with head_of_a + tail_of_b."""
+    try:
+        import moderngl
+        import numpy as np
+    except ImportError as e:
+        raise RuntimeError(
+            "GLSL transitions require moderngl + numpy. "
+            "Install with `uv add moderngl numpy` or use a non-GLSL transition."
+        ) from e
+
+    a_dur = _ffprobe_duration(a)
+    b_dur = _ffprobe_duration(b)
+    duration = max(MIN_NONCUT_DURATION, min(MAX_DURATION, duration, a_dur, b_dur))
+    transition_start_in_a = max(0.0, a_dur - duration)
+
+    tail_buf = _read_video_frames(a, transition_start_in_a, duration, width, height, fps)
+    head_buf = _read_video_frames(b, 0.0,                    duration, width, height, fps)
+    frame_bytes = width * height * 3
+    actual_n = min(len(tail_buf), len(head_buf)) // frame_bytes
+    if actual_n < 1:
+        return _concat_files([a, b], out, width=width, height=height, fps=fps)
+
+    tail = np.frombuffer(tail_buf[: actual_n * frame_bytes], dtype=np.uint8).reshape(actual_n, height, width, 3)
+    head = np.frombuffer(head_buf[: actual_n * frame_bytes], dtype=np.uint8).reshape(actual_n, height, width, 3)
+
+    try:
+        ctx = moderngl.create_standalone_context(backend="egl")
+    except Exception:
+        ctx = moderngl.create_standalone_context()
+
+    fragment = _GLSL_FRAGMENT_TEMPLATE.replace("%USER_BODY%", shader_body)
+    prog = ctx.program(vertex_shader=_GLSL_VERTEX, fragment_shader=fragment)
+
+    quad = np.array(
+        [
+            -1, -1, 0.0, 1.0,
+             1, -1, 1.0, 1.0,
+            -1,  1, 0.0, 0.0,
+             1,  1, 1.0, 0.0,
+        ],
+        dtype="f4",
+    )
+    vbo = ctx.buffer(quad.tobytes())
+    vao = ctx.simple_vertex_array(prog, vbo, "in_pos", "in_uv")
+
+    fbo = ctx.framebuffer(color_attachments=[ctx.texture((width, height), 3)])
+    fbo.use()
+    ctx.viewport = (0, 0, width, height)
+
+    tex_from = ctx.texture((width, height), 3)
+    tex_to   = ctx.texture((width, height), 3)
+    tex_from.use(location=0)
+    tex_to.use(location=1)
+    if "from" in prog: prog["from"].value = 0
+    if "to"   in prog: prog["to"].value   = 1
+    if "ratio" in prog: prog["ratio"].value = width / height
+
+    rendered = bytearray()
+    for i in range(actual_n):
+        # ffmpeg gives top-down rgb24; flip rows so gl-transitions UVs
+        # land where the shader expects them.
+        tex_from.write(np.ascontiguousarray(tail[i][::-1]).tobytes())
+        tex_to.write(  np.ascontiguousarray(head[i][::-1]).tobytes())
+        if "progress" in prog:
+            prog["progress"].value = i / max(1, actual_n - 1)
+        ctx.clear()
+        vao.render(moderngl.TRIANGLE_STRIP)
+        pixels = fbo.color_attachments[0].read()
+        arr = np.frombuffer(pixels, dtype=np.uint8).reshape(height, width, 3)[::-1]
+        rendered.extend(arr.tobytes())
+
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix="autofilm_glsl_") as tmp:
+        tmpdir = Path(tmp)
+        trans_clip = tmpdir / "trans.mp4"
+        _write_rgb24_video(bytes(rendered), width, height, fps, trans_clip)
+
+        a_has = _has_audio_stream(a)
+        b_has = _has_audio_stream(b)
+        if a_has and b_has:
+            trans_with_audio = tmpdir / "trans_with_audio.mp4"
+            subprocess.run(
+                [
+                    "ffmpeg", "-y", "-loglevel", "error",
+                    "-i", str(trans_clip),
+                    "-ss", f"{transition_start_in_a:.3f}", "-t", f"{duration:.3f}", "-i", str(a),
+                    "-t", f"{duration:.3f}", "-i", str(b),
+                    "-filter_complex",
+                    f"[1:a][2:a]acrossfade=duration={duration:.3f}:overlap=1[a]",
+                    "-map", "0:v", "-map", "[a]",
+                    "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+                    str(trans_with_audio),
+                ],
+                check=True,
+            )
+            trans_clip = trans_with_audio
+
+        head_a = tmpdir / "head_a.mp4"
+        tail_b = tmpdir / "tail_b.mp4"
+        if transition_start_in_a > 0.01:
+            subprocess.run(
+                [
+                    "ffmpeg", "-y", "-loglevel", "error",
+                    "-i", str(a), "-t", f"{transition_start_in_a:.3f}",
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast",
+                    "-c:a", "aac", "-b:a", "192k",
+                    str(head_a),
+                ],
+                check=True,
+            )
+        if b_dur > duration + 0.01:
+            subprocess.run(
+                [
+                    "ffmpeg", "-y", "-loglevel", "error",
+                    "-ss", f"{duration:.3f}", "-i", str(b),
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast",
+                    "-c:a", "aac", "-b:a", "192k",
+                    str(tail_b),
+                ],
+                check=True,
+            )
+
+        parts = [p for p in (head_a, trans_clip, tail_b) if p.exists()]
+        return _concat_files(parts, out, width=width, height=height, fps=fps)
+
+
+def _render_pairwise(
+    clip_paths: list[Path],
+    transitions: list[dict],
+    output_path: Path,
+    *,
+    fps: int,
+    width: int,
+    height: int,
+    bitrate: str,
+) -> Path:
+    """Pairwise renderer used when at least one transition is GLSL.
+
+    Walks (clip_a, clip_b) pairs in order, applying ffmpeg-xfade or GLSL
+    per transition. After each pair the rolling output becomes the new
+    clip_a for the next iteration. Slower than the single-filter-graph
+    fast path (~N file rewrites per scene), but it's the only way to
+    interleave shader stages with xfade stages cleanly.
+    """
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix="autofilm_pairwise_") as tmp:
+        tmpdir = Path(tmp)
+        rolling = Path(clip_paths[0])
+        for i, t in enumerate(transitions):
+            stage = tmpdir / f"stage_{i:03d}.mp4"
+            nxt = Path(clip_paths[i + 1])
+            t = clamp_for_clip_durations(
+                t, _ffprobe_duration(rolling), _ffprobe_duration(nxt)
+            )
+            if t.get("glsl"):
+                _render_glsl_pair(
+                    rolling, nxt, t["glsl"], t["duration"], stage,
+                    width=width, height=height, fps=fps,
+                )
+            elif t.get("xfade"):
+                a_dur = _ffprobe_duration(rolling)
+                b_dur = _ffprobe_duration(nxt)
+                fc, lv, la = _build_filter_complex([a_dur, b_dur], [t], width, height, fps)
+                cmd = [
+                    "ffmpeg", "-y", "-loglevel", "error",
+                    "-i", str(rolling), "-i", str(nxt),
+                    "-filter_complex", fc,
+                    "-map", f"[{lv}]", "-map", f"[{la}]",
+                    "-c:v", "libx264", "-preset", "medium", "-b:v", bitrate,
+                    "-pix_fmt", "yuv420p", "-r", str(fps),
+                    "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
+                    str(stage),
+                ]
+                subprocess.run(cmd, check=True)
+            else:
+                _concat_files([rolling, nxt], stage, width=width, height=height, fps=fps)
+            rolling = stage
+
+        shutil.copy(str(rolling), str(output_path))
+    return output_path
