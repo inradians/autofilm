@@ -1,13 +1,13 @@
 # Setting up autofilm
 
-This is a complete first-time setup guide. Budget about 30 minutes the first time, mostly waiting for org-verification approvals on a couple of the providers. Once you have keys, you can run an experiment in ~20 minutes for ~$25.
+This is the first-time setup guide for the **Runway-consolidated stack**. Compared to the original 5-provider setup, this version goes from five required keys to three, drops the two annoying approval delays (OpenAI org verification and Google Cloud billing), and gets you to a green setup-check in **about 15 minutes** for **~$25 in prepaid credits**.
 
 ## 1. Prerequisites
 
 | Tool | Version | Why |
 |------|---------|-----|
 | **Python** | 3.10 or newer (3.11 recommended) | matches `pyproject.toml` |
-| **ffmpeg** | 4.4+ | color grade chain uses `colorbalance` and `eq`; older builds choke |
+| **ffmpeg** | 4.4+ | the color-grade chain uses `colorbalance` and `eq`; older builds choke |
 | **uv** | latest | recommended for dep management; `pip` works as fallback |
 
 Install ffmpeg:
@@ -52,11 +52,11 @@ Fill in the keys as you acquire them in step 4. The `.env` file is gitignored �
 
 ## 4. Get the API keys
 
-You need four keys, plus one optional. Two of the required ones have approval steps that take 10-30 minutes; start those first so you can fill in the others while you wait.
+You need **three keys**, plus one optional. None has an approval delay this time, so you can do them in any order.
 
 ### 4a. Anthropic — Claude Opus 4.7
 
-Powers script parsing, casting, look book generation, edit decisions, and one of the two critic reviewers.
+Powers script parsing, casting, look book generation, edit decisions, and the stills critic reviewer.
 
 1. Go to **https://console.anthropic.com**
 2. Sign in. Click **Settings → API Keys** in the left nav.
@@ -68,77 +68,48 @@ Powers script parsing, casting, look book generation, edit decisions, and one of
 ANTHROPIC_API_KEY=sk-ant-api03-...
 ```
 
-**Cost expectation:** ~$5/experiment for Claude calls.
+**Cost expectation:** ~$5 per default-size experiment for Claude calls.
 
 ---
 
-### 4b. OpenAI — GPT Image 2
+### 4b. Runway — image, video, and SFX in one API
 
-Powers first-frame composition and the look book's style frame. **Has the biggest setup gotcha in the whole stack — start this first.**
+This single key replaces what used to be **four** separate provider integrations: OpenAI (GPT Image 2), Google AI (Nano Banana 2 + Veo 3.1), and ElevenLabs (SFX). Runway proxies all of those models — including Veo 3.1 — through one credit-billed API.
 
-1. Go to **https://platform.openai.com**
-2. Sign in. Click **Settings (gear icon) → Organization → General**.
-3. Click **Verify Organization**. You'll be asked to upload a government ID. **This is required for `gpt-image-2`** — without verification, every image call returns HTTP 403 with a "must verify your organization" error message. Approval usually takes 5-30 minutes.
-4. While you wait, click **API keys** in the left nav and **Create new secret key**. Copy `sk-proj-...`.
-5. Click **Settings → Billing** and add at least $20. OpenAI is also prepaid.
-6. Paste into `.env`:
-
-```
-OPENAI_API_KEY=sk-proj-...
-```
-
-**Cost expectation:** ~$3/experiment for image generations.
-
-**If you skip verification:** every shot's first-frame call will fail with a 403 and the bible will have empty frame slots. The error message names the cause directly.
-
----
-
-### 4c. Google AI — Nano Banana 2 + Veo 3.1 + Gemini 3 Pro
-
-A single key drives three models: image generation (Nano Banana 2 for character refs and location moodboards), video generation (Veo 3.1 for every shot), and the long-video critic (Gemini 3 Pro). **Veo 3.1 is paid-only** — it is not on the Gemini free tier.
-
-1. Go to **https://aistudio.google.com**
-2. Sign in with a Google account.
-3. Click **Get API key** in the top right. Either create a new project or use an existing Google Cloud project.
-4. Copy the key (`AIza...`).
-5. Critical: click **Set up billing** on the same page (or go to **https://console.cloud.google.com/billing** for the project). Link a billing account. **Veo 3.1 will refuse to run without billing enabled** — you'll get a "model not available for your project" error.
-6. Paste into `.env`:
-
-```
-GOOGLE_AI_API_KEY=AIza...
-```
-
-**Cost expectation:** Veo 3.1 Fast at $0.15/sec dominates the bill — ~$15/experiment for ~96 sec of video. Nano Banana 2 and Gemini 3 Pro together add ~$3.
-
-**Region note:** Veo has limited regional availability for `personGeneration` settings in EU/UK/Switzerland/MENA. The pipeline already uses `allow_adult` mode which works in those regions, but if you see a `personGeneration` error, that's why.
-
----
-
-### 4d. ElevenLabs — Ambient SFX beds (OPTIONAL)
-
-This one is optional. ElevenLabs adds an ambient sound bed per scene (rain, jungle, room tone) layered under Veo's native dialogue audio and the music cue. **You can skip this entirely** — Veo's synced audio plus the Stable Audio music already give you a complete scene mix, and the pipeline detects an empty `ELEVENLABS_API_KEY` and skips the SFX layer cleanly.
-
-Skip it if: you're doing your first one-or-two runs, you want to keep monthly costs at zero, or you don't care about ambient texture under dialogue. Add it later once everything else is dialed in.
-
-If you do want the ambient layer:
-
-1. Go to **https://elevenlabs.io**
-2. Sign up. Click your **Profile picture (top right) → Profile + API key**.
-3. Copy the key.
-4. Pick a tier on the **Subscription** page. The free tier has limited monthly quota that's enough for a few experiments. Paid tiers (Starter $5/mo, Creator $22/mo) raise the quota; cancel any time. ElevenLabs is the only provider in the stack billed by subscription rather than pay-as-you-go.
+1. Go to **https://dev.runwayml.com/**
+2. Sign in (or create an account). Click **API Keys** in the left nav.
+3. Click **Create API Key**, name it (e.g. "autofilm"), copy the value (`key_...`).
+4. Click **Usage & Billing** and add credits. Runway is prepaid at **$0.01 per credit**. Top up at least **$20 (2,000 credits)**. A default 3-scene experiment uses ~2,200 credits ($22).
 5. Paste into `.env`:
 
 ```
-ELEVENLABS_API_KEY=sk_...
+RUNWAYML_API_SECRET=key_...
 ```
 
-**Cost expectation:** $0/experiment if skipped, otherwise included in your subscription tier's monthly quota.
+**Cost expectation:** ~$22 per default-size experiment, dominated by Veo at 15 credits/sec ($0.15/sec) for ~96 sec of generated video. Drop to ~$10 with `MAX_SCENES=1`.
+
+**What you can pick from on this single key:**
+
+| Model | Use | Cost |
+|---|---|---|
+| `veo3.1_fast` | default video model, native audio | 10–15 c/s |
+| `veo3.1` | hero/final delivery, native audio | 20–40 c/s |
+| `gen4.5` | image-to-video with **native reference-image identity-lock** | 12 c/s |
+| `seedance2` | up to 15s in one call (busts the 8s Veo cap) | 36 c/s |
+| `gen4_aleph` | video-to-video transformation (per-shot grading) | 15 c/s |
+| `gpt_image_2` | first-frame composition (best instruction-following) | 1–41 c/img by quality |
+| `gemini_image3_pro` | Nano Banana — identity refs, multi-image fusion | 20 c/img |
+| `gen4_image` / `gen4_image_turbo` | Runway-native, strongest for character continuity | 5–8 c / 2 c |
+| `eleven_text_to_sound_v2` | ambient SFX beds | 1 c/s |
+| `eleven_multilingual_v2` | TTS narrator (new) | 1 c/50 chars |
+
+**Region note:** Some Veo features have limited regional availability for `personGeneration` settings. The pipeline uses `allow_adult` mode which works in most regions; if you see a `personGeneration` error, file an issue.
 
 ---
 
-### 4e. Stability AI — Stable Audio 2.5
+### 4c. Stability — Stable Audio 2.5
 
-Powers the music score per scene. Up to 47 seconds per generation, instrumental.
+Powers the music score per scene. Up to 47 seconds per generation, instrumental. **Kept on the direct Stability API because Runway has no music model** — its audio offerings are SFX and TTS only.
 
 1. Go to **https://platform.stability.ai**
 2. Sign up. Click **Account → API keys → Create API key**.
@@ -149,7 +120,30 @@ Powers the music score per scene. Up to 47 seconds per generation, instrumental.
 STABILITY_API_KEY=sk-...
 ```
 
-**Cost expectation:** ~$1/experiment.
+**Cost expectation:** ~$1 per experiment.
+
+---
+
+### 4d. Google AI — Gemini 3 Pro long-video critic (OPTIONAL)
+
+This is now optional. Veo 3.1 has moved to Runway, so the Google AI key only powers **Reviewer A** in `evaluate_film()` — the long-video critic that watches the actual `final.mp4` end-to-end with timestamp citations. Without it, `evaluate.py` falls back to Reviewer B (Claude Opus 4.7 on representative stills) as the sole reviewer.
+
+Skip it if: you're cost-sensitive, you trust Claude's stills review, you don't want to enable Google Cloud billing.
+
+If you want the second reviewer:
+
+1. Go to **https://aistudio.google.com**
+2. Click **Get API key** (top right). Use any project — billing isn't required for Gemini 3 Pro under the free tier as long as you stay under quota.
+3. Copy the key (`AIza...`).
+4. Paste into `.env`:
+
+```
+GOOGLE_AI_API_KEY=AIza...
+```
+
+**Cost expectation:** ~$1 per experiment for the critic, or $0 if skipped.
+
+**Why we keep this on direct Google AI:** Runway proxies many Google models (Veo, Gemini Image 3 Pro, Gemini 2.5 Flash) but not the long-video review path. The Gemini 3 Pro `generateContent` endpoint with a video file attachment + tool-calling response is the cleanest way to get scored axis output, and that path goes through the Google AI Studio API directly.
 
 ---
 
@@ -182,24 +176,23 @@ Run the included check before your first real experiment:
 python scripts/check_setup.py
 ```
 
-It pings each provider with the cheapest possible call (or a free metadata endpoint where available), reports OK/FAIL per key, and warns about the common gotchas. Total cost: a fraction of a cent. Total time: ~10 seconds.
+It pings each provider with a free or near-free call, reports OK / FAIL / SKIP per key, and warns about common issues. Total cost: a fraction of a cent. Total time: ~10 seconds.
 
 A clean output looks like:
 
 ```
-ANTHROPIC_API_KEY     OK   claude-opus-4-7 reachable
-OPENAI_API_KEY        OK   org verified, gpt-image-2 listed
-GOOGLE_AI_API_KEY     OK   billing enabled, veo-3.1-fast available
-STABILITY_API_KEY     OK   credits: $18.40
-ELEVENLABS_API_KEY    SKIP optional — ambient SFX layer disabled
+ANTHROPIC_API_KEY      OK   claude-opus-4-7 reachable
+RUNWAYML_API_SECRET    OK   2000 credits ($20.00)
+GOOGLE_AI_API_KEY      OK   gemini-3-pro reachable (critic enabled)
+STABILITY_API_KEY      OK   180.0 credits (~18 generations)
 
-ffmpeg                OK   version 6.1.1
-book pdf              OK   /mnt/user-data/uploads/JurassicPark-MichaelCrichton.pdf (211 pp)
+ffmpeg                 OK   version 6.1.1
+book pdf               OK   JurassicPark-MichaelCrichton.pdf (211 pp)
 
 All systems go. python produce.py to run an experiment.
 ```
 
-`SKIP` is the recommended default for ElevenLabs unless you specifically want the ambient sound bed. If any line says FAIL, the message tells you exactly which step in section 4 to revisit.
+`SKIP` next to `GOOGLE_AI_API_KEY` is fine — that key is optional and the long-video critic just degrades to Claude-stills-only review. If any line says FAIL, the message tells you exactly which step in section 4 to revisit.
 
 ## 8. First run — cost-aware
 
@@ -207,17 +200,17 @@ For your very first experiment, cap everything tight:
 
 ```bash
 MAX_SCENES=1 TAKES_PER_SHOT=1 VEO_TIER=fast VEO_RESOLUTION=720p \
-  python produce.py
+  uv run produce.py
 ```
 
-That generates one scene (~3-6 shots, ~24-48 sec of video) for **~$5-8** instead of the default ~$28. You'll get back an `experiments/exp_001/` directory with everything: cast, locations, look book, storyboard, references, frames, clips, music, EDL, `final.mp4`, and `bible.pdf`. Open the bible to see the full output — including a "Prompts" section that shows every prompt the pipeline sent to every model on this run, organized by model. Useful for understanding what the agent actually did.
+That generates one scene (~3-6 shots, ~24-48 sec of video) for **~$5-7** instead of the default ~$22. You'll get back an `experiments/exp_001/` directory with everything: cast, locations, look book, storyboard, references, frames, clips, music, EDL, `final.mp4`, and `bible.pdf`. Open the bible to see the full output — including a "Prompts" section that shows every prompt the pipeline sent to every model on this run, organized by model. Useful for understanding what the agent actually did.
 
 Once you've confirmed it works end-to-end, raise `MAX_SCENES` to 3 (default) or higher.
 
 To score the result and produce a critic's report:
 
 ```bash
-python evaluate.py latest
+uv run evaluate.py latest
 ```
 
 This refreshes the bible PDF with the critique section and writes `metric.json` with the `film_loss` score plus structured `changes` suggestions.
@@ -226,47 +219,47 @@ This refreshes the bible PDF with the critique section and writes `metric.json` 
 
 This is a self-funded weekend project — every dollar is yours. Two cost shapes worth budgeting against:
 
-**Minimum viable run** (`MAX_SCENES=1`, ElevenLabs skipped, Veo Fast, 720p) — about **$6 per experiment**:
+**Minimum viable run** (`MAX_SCENES=1`, ambient SFX off, Veo Fast, 720p, Claude-stills-only review) — about **$6 per experiment**:
 
 | Provider | Cost |
 |----------|------|
 | Anthropic | ~$2 |
-| OpenAI | ~$1 |
-| Google (Nano Banana 2 + Veo Fast 24-48s + Gemini critic) | ~$3 |
+| Runway (gpt_image_2 + nano-banana + Veo Fast 24-48s) | ~$3 |
 | Stability | <$1 |
 | **per experiment** | **~$6** |
 
-**Default run** (`MAX_SCENES=3`, ElevenLabs on, Veo Fast, 720p) — about **$28 per experiment**:
+**Default run** (`MAX_SCENES=3`, ambient SFX off, Veo Fast, 720p, both reviewers) — about **$28 per experiment**:
 
 | Provider | Cost |
 |----------|------|
 | Anthropic (Claude Opus 4.7) | ~$5 |
-| OpenAI (GPT Image 2) | ~$3 |
-| Google (Nano Banana 2) | ~$2 |
-| Google (Veo 3.1 Fast — ~96 sec at $0.15/sec) | ~$15 |
+| Runway: image (gpt_image_2 + nano-banana) | ~$5 |
+| Runway: video (Veo 3.1 Fast — ~96s @ $0.15/s) | ~$15 |
+| Runway: SFX (skipped by default) | ~$0 |
 | Stability (Stable Audio) | ~$1 |
-| ElevenLabs (SFX) | ~$1 (or $0 if skipped) |
-| Google (Gemini 3 Pro critic) | ~$1 |
-| **per experiment** | **~$28** |
+| Google AI (Gemini 3 Pro critic) | ~$1 |
+| **per experiment** | **~$27** |
 
-`TAKES_PER_SHOT=3` roughly triples the run cost. `VEO_TIER=standard` raises Veo's cost from $0.15/sec to $0.40/sec.
+`TAKES_PER_SHOT=3` roughly triples the run cost. `VEO_TIER=standard` raises Veo's cost from $0.15/sec to $0.40/sec. `AMBIENT_SFX_ENABLED=1` adds ~$1/run.
 
-A reasonable pattern: do a single MAX_SCENES=1 smoke test (~$6) to verify the pipeline works on your keys, then 2-3 default experiments (~$28 each) over a weekend. Total commitment: $60-100. Cancel ElevenLabs and let prepaid credits sit otherwise.
+A reasonable pattern: do a single MAX_SCENES=1 smoke test (~$6) to verify the pipeline works on your keys, then 2-3 default experiments (~$27 each) over a weekend. Total commitment: $60-90.
 
 ## 10. Troubleshooting
 
 | Error | Cause | Fix |
 |-------|-------|-----|
-| `403 ... must verify your organization` (OpenAI) | Account not verified for image gen | Section 4b step 3 |
-| `model not available for your project` (Veo) | Billing not enabled | Section 4c step 5 |
-| `Ambient {scene} failed: ...` | ElevenLabs key invalid or quota hit | Either fix the key or unset `ELEVENLABS_API_KEY` to skip SFX entirely |
-| `insufficient credits` (Stability) | Account out of credits | Top up $10 minimum |
-| `PermissionDenied: personGeneration` (Veo) | EU/UK/etc region restriction | Already handled — file an issue if it persists |
-| `No module named 'google.genai'` | Old `google-generativeai` package, not the new SDK | `uv sync` to refresh |
-| `Unknown encoder libx264` (ffmpeg) | Stripped ffmpeg build | Reinstall full ffmpeg from official source |
-| `pdfplumber: No /Pages` | Encrypted or scanned PDF | Use a different copy or OCR it first |
-| Bible has empty frame slots | OpenAI 403 (org verification) | See first row above |
-| Bible has empty video clips | Veo billing or region issue | See section 4c |
+| `RUNWAYML_API_SECRET is not set` | key missing from environment | Section 4b — `cp .env.example .env` and fill in |
+| `401 Unauthorized` (Runway) | invalid key, or revoked | Reissue at dev.runwayml.com → API Keys |
+| `Task failed — SAFETY.INPUT.*` (Runway) | content moderation rejected the prompt | Try a less violent or less explicit prompt |
+| `Task failed — ASSET.INVALID` (Runway) | image/video format not supported | Re-encode as PNG/JPEG (image) or H.264 MP4 (video) |
+| `429 Rate limited` (Runway) | hit the per-tier rate limit | Wait — `prepare.py` retries with backoff |
+| `insufficient credits` (Runway) | run out of credits mid-experiment | Top up at dev.runwayml.com → Billing |
+| `insufficient credits` (Stability) | account out of credits | Top up $10 minimum |
+| Bible has empty frame slots | image task failed mid-pipeline | Re-run `produce.py` — stages are idempotent |
+| Bible has empty video clips | Veo task failed | Check Runway dashboard for the failed task id |
+| `No module named 'runwayml'` | dep not installed | `uv sync` to refresh |
+| `Unknown encoder libx264` (ffmpeg) | stripped ffmpeg build | Reinstall full ffmpeg from official source |
+| `pdfplumber: No /Pages` | encrypted or scanned PDF | Use a different copy or OCR it first |
 
 If a stage keeps failing for environmental reasons (network, API errors, timeouts), don't iterate around it — the pipeline is supposed to crash loudly on infrastructure problems so you can fix them at the source.
 
@@ -274,17 +267,23 @@ If a stage keeps failing for environmental reasons (network, API errors, timeout
 
 ```
 autofilm/
-├── prepare.py        # fixed scaffolding: API clients, Veo/Claude/etc helpers, Experiment class
+├── prepare.py        # fixed scaffolding: API clients, Runway/Claude/Gemini helpers, Experiment class
 ├── produce.py        # the file the agent edits: prompts, look book, shot list, etc.
 ├── evaluate.py       # runs the critic, writes metric.json
 ├── bible.py          # auto-builds bible.pdf from experiment artifacts
 ├── program.md        # instructions to the autonomous agent
 ├── README.md         # project overview
 ├── SETUP.md          # this file
+├── CHANGELOG.md      # migration history
 ├── .env.example      # template for your .env
 ├── pyproject.toml    # dependencies
-└── scripts/
-    └── check_setup.py  # ping each provider, verify everything works
+├── scripts/
+│   └── check_setup.py  # ping each provider, verify everything works
+└── .claude/
+    └── skills/         # vendored Runway agent skills (auto-discovered by Claude Code)
+        ├── rw-generate-video/
+        ├── rw-generate-image/
+        └── rw-generate-audio/
 ```
 
 Once you've made it through this guide once, day-to-day use is just: edit `produce.py`, run `python produce.py`, run `python evaluate.py latest`, open `experiments/exp_NNN/bible.pdf`, repeat.

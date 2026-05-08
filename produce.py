@@ -1159,11 +1159,12 @@ def compile_final(exp: Experiment, script: dict, storyboard: dict,
 
         scene_video = concatenate_videoclips(shot_clips, method="compose")
 
-        # Ambient bed. Optional — if no ElevenLabs key is configured the
-        # whole layer is skipped quietly (Veo's native audio + the music
-        # cue still cover the scene).
+        # Ambient bed. Optional — controlled by AMBIENT_SFX_ENABLED. When
+        # off (the default), Veo's native audio + the music cue cover the
+        # scene mix and we save ~$1/run. SFX now goes through Runway's
+        # eleven_text_to_sound_v2 endpoint, billed in Runway credits.
         ambient_path = exp.path(f"sfx/{scene_id}/ambient.wav")
-        if os.getenv("ELEVENLABS_API_KEY", "").strip():
+        if os.getenv("AMBIENT_SFX_ENABLED", "0").lower() in ("1", "true", "yes", "on"):
             sfx_prompt = (
                 f"Continuous ambient sound, no music, no dialogue. "
                 f"{scene['location']} at {scene.get('time_of_day', 'day')}. "
@@ -1177,7 +1178,7 @@ def compile_final(exp: Experiment, script: dict, storyboard: dict,
                     print(f"  Ambient {scene_id} failed: {e}")
             exp.log_prompt(
                 target=f"sfx/{scene_id}/ambient.wav",
-                model="elevenlabs-sfx",
+                model="eleven_text_to_sound_v2",
                 prompt=sfx_prompt,
                 stage="ambient_sfx",
                 scene=scene_id,

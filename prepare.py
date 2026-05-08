@@ -45,8 +45,11 @@ from typing import Any, Callable
 
 import anthropic
 import httpx
-from openai import OpenAI
 from tenacity import retry, stop_after_attempt, wait_exponential
+
+# Runway proxies image, video, and SFX generation through one API.
+# See https://docs.dev.runwayml.com/ and runway-skills/ in this repo.
+from runwayml import RunwayML
 
 # Load .env from project root if present.
 try:
@@ -80,35 +83,67 @@ BOOK_PDF_PATH = Path(
 # fixed budget, like autoresearch's 5-min training cap.
 MAX_SCENES = int(os.getenv("MAX_SCENES", "3"))
 
-# --- Models (the canonical, SOTA-as-of-April-2026 lineup) ---
+# --- Models (SOTA stack as of May 2026, accessed via Runway + Anthropic + Stability) ---
+# Anthropic: Claude Opus 4.7 (text/critic-stills, direct API).
+# Google AI: Gemini 3 Pro (long-video critic only — Runway has no video-review LLM).
+# Runway: image, video, and SFX generation. See https://docs.dev.runwayml.com/guides/models/
+# Stability: Stable Audio 2.5 (music score — Runway has no music model).
 CLAUDE_MODEL = "claude-opus-4-7"
-GPT_IMAGE_MODEL = "gpt-image-2"
-NANO_BANANA_MODEL = "gemini-3.1-flash-image-preview"
-VEO_MODEL_LITE = "veo-3.1-lite-generate-preview"
-VEO_MODEL_FAST = "veo-3.1-fast-generate-preview"
-VEO_MODEL_STANDARD = "veo-3.1-generate-preview"
 GEMINI_PRO_MODEL = "gemini-3-pro"
 
+# Runway image model IDs. The Runway endpoint is /v1/text_to_image with the
+# `model` field selecting which generator. All three accept `referenceImages`
+# (gen4_image_turbo *requires* it). Pricing is in credits at $0.01/credit.
+GPT_IMAGE_MODEL    = "gpt_image_2"          # 1-41 credits/image (high@1K=20, high@4K=41)
+NANO_BANANA_MODEL  = "gemini_image3_pro"    # 20 credits @ 1K/2K, 40 credits @ 4K
+GEN4_IMAGE_MODEL   = "gen4_image"           # 5 credits @ 720p, 8 credits @ 1080p — native ref-image support
+GEN4_IMAGE_TURBO   = "gen4_image_turbo"     # 2 credits, references REQUIRED
+GEMINI_FLASH_MODEL = "gemini_2.5_flash"     # 5 credits, any resolution
+
+# Runway video model IDs. Endpoint: /v1/image_to_video (or /v1/text_to_video,
+# /v1/video_to_video for Aleph). Veo 3.1 is proxied through Runway so the
+# numbers match what direct Google AI charged us pre-migration. The new
+# entries (gen4.5, seedance2, gen4_aleph) are Runway-native and unlock
+# stronger identity-lock and longer single-call durations.
+VEO_MODEL_LITE     = "veo3.1_fast"          # Runway has no Lite tier; fast is the cheapest Veo
+VEO_MODEL_FAST     = "veo3.1_fast"          # 10-15 credits/sec depending on audio
+VEO_MODEL_STANDARD = "veo3.1"               # 20-40 credits/sec depending on audio
+GEN45_MODEL        = "gen4.5"               # 12 credits/sec — Runway flagship, image-to-video w/ refs
+GEN4_TURBO_MODEL   = "gen4_turbo"           # 5 credits/sec — image-to-video only, fast iteration
+GEN4_ALEPH_MODEL   = "gen4_aleph"           # 15 credits/sec — video-to-video, transformation
+SEEDANCE2_MODEL    = "seedance2"            # 36 credits/sec — premium, supports up to 15s
+
+# Runway SFX model.
+RUNWAY_SFX_MODEL   = "eleven_text_to_sound_v2"
+
 # --- Video model registry ---
-# Single source of truth for shot-list planning. Veo 3.1's native single-call
-# cap is 8 seconds; we use that as the hard ceiling for shot duration. Three
-# tiers trade cost for quality at the same 8s cap. Numbers verified against
-# vendor docs April 2026.
+# Single source of truth for shot-list planning. Three Veo tiers preserve the
+# old previs/fast/standard contract; gen4.5 / seedance2 are added as creative
+# alternatives the agent can switch into. cost_per_sec is in USD and assumes
+# audio is enabled (the Veo prompt block produces dialogue).
+#
+# Note on duration cap: Veo's native single-call max is 8s. Seedance2 lifts
+# that to 15s, but the storyboarding logic still defaults to ≤8s shots so
+# old produce.py doesn't have to know about the new ceiling. Switch a shot
+# to seedance2 explicitly via `route_shot(.., tier="seedance2")` to use it.
 VIDEO_MODELS = {
     "veo3.1_lite": {
-        "id":               VEO_MODEL_LITE,
-        "vendor":           "google",
+        "id":               VEO_MODEL_FAST,    # alias to fast — Runway has no Lite
+        "vendor":           "runway",
+        "endpoint":         "image_to_video",
         "max_seconds":      8,
         "duration_options": [4, 6, 8],
         "fps":              24,
         "max_resolution":   "1080p",
         "native_audio":     True,
-        "cost_per_sec":     0.07,
+        "cost_per_sec":     0.15,
         "use_for":          "previs",
+        "supports_refs":    False,
     },
     "veo3.1_fast": {
         "id":               VEO_MODEL_FAST,
-        "vendor":           "google",
+        "vendor":           "runway",
+        "endpoint":         "image_to_video",
         "max_seconds":      8,
         "duration_options": [4, 6, 8],
         "fps":              24,
@@ -116,30 +151,98 @@ VIDEO_MODELS = {
         "native_audio":     True,
         "cost_per_sec":     0.15,
         "use_for":          "iteration",
+        "supports_refs":    False,
     },
     "veo3.1_standard": {
         "id":               VEO_MODEL_STANDARD,
-        "vendor":           "google",
+        "vendor":           "runway",
+        "endpoint":         "image_to_video",
         "max_seconds":      8,
         "duration_options": [4, 6, 8],
         "fps":              24,
-        "max_resolution":   "4K",  # preview adds 4K at same length cap
+        "max_resolution":   "1080p",
         "native_audio":     True,
         "cost_per_sec":     0.40,
         "use_for":          "hero",
+        "supports_refs":    False,
+    },
+    "gen4.5": {
+        "id":               GEN45_MODEL,
+        "vendor":           "runway",
+        "endpoint":         "image_to_video",
+        "max_seconds":      10,
+        "duration_options": [5, 10],
+        "fps":              24,
+        "max_resolution":   "1080p",
+        "native_audio":     False,           # Runway adds audio via TTS/SFX layer
+        "cost_per_sec":     0.12,
+        "use_for":          "identity_lock",  # native referenceImages support
+        "supports_refs":    True,
+    },
+    "seedance2": {
+        "id":               SEEDANCE2_MODEL,
+        "vendor":           "runway",
+        "endpoint":         "image_to_video",
+        "max_seconds":      15,
+        "duration_options": [5, 10, 15],
+        "fps":              24,
+        "max_resolution":   "1080p",
+        "native_audio":     False,
+        "cost_per_sec":     0.36,
+        "use_for":          "long_oner",      # the only model that can do >8s in one call
+        "supports_refs":    True,
     },
 }
+
 
 # --- Render budget. Capped tightly so iteration stays cheap. ---
 ASPECT_RATIO = "16:9"
 SHOT_DURATION_SECONDS = int(os.getenv("SHOT_DURATION_SECONDS", "8"))
-VEO_TIER = os.getenv("VEO_TIER", "fast").lower()  # fast | standard
+VEO_TIER = os.getenv("VEO_TIER", "fast").lower()  # previs | fast | standard | gen4.5 | seedance2
 VEO_RESOLUTION = os.getenv("VEO_RESOLUTION", "720p")
 TAKES_PER_SHOT = int(os.getenv("TAKES_PER_SHOT", "1"))  # 1 for cheap iteration
 
 
 def veo_final_model() -> str:
-    return VEO_MODEL_STANDARD if VEO_TIER == "standard" else VEO_MODEL_FAST
+    """Default model id for the current VEO_TIER. Used when produce.py
+    asks for the 'main' video model rather than picking one per shot."""
+    if VEO_TIER == "standard":
+        return VEO_MODEL_STANDARD
+    if VEO_TIER == "gen4.5":
+        return GEN45_MODEL
+    if VEO_TIER == "seedance2":
+        return SEEDANCE2_MODEL
+    return VEO_MODEL_FAST
+
+
+# Aspect-ratio strings for Runway. Per docs.dev.runwayml.com/assets/inputs,
+# each video model supports only a specific set of pixel ratios, and most
+# *don't* support 1920:1080 — it's a Veo-only ratio. Image-to-video Gen-4.5
+# tops out at 1280:720 in landscape; image generators have their own list.
+# Map (model, aspect, resolution) → the closest supported pixel ratio.
+def _runway_ratio(
+    aspect: str = ASPECT_RATIO,
+    resolution: str = VEO_RESOLUTION,
+    model: str | None = None,
+) -> str:
+    """Return the Runway pixel-ratio string for a given aspect/resolution/model.
+
+    Falls back to model-agnostic defaults if `model` is None or unknown.
+    Veo accepts 1920:1080; most others don't, so we clamp 1080p requests
+    on non-Veo models to the closest 720p-class ratio they accept.
+    """
+    veo_ish = model in (VEO_MODEL_FAST, VEO_MODEL_STANDARD, "veo3", "veo3.1", "veo3.1_fast")
+    if aspect == "16:9":
+        if resolution == "1080p" and veo_ish:
+            return "1920:1080"
+        return "1280:720"
+    if aspect == "9:16":
+        if resolution == "1080p" and veo_ish:
+            return "1080:1920"
+        return "720:1280"
+    if aspect == "1:1":
+        return "960:960" if model in ("gen4.5", GEN45_MODEL, "gen4_turbo", GEN4_TURBO_MODEL) else "1024:1024"
+    return "1280:720"
 
 
 # ============================================================================
@@ -155,25 +258,30 @@ def claude() -> anthropic.Anthropic:
 
 
 @lru_cache(maxsize=1)
-def openai_client() -> OpenAI:
-    return OpenAI(
-        api_key=_require_key("OPENAI_API_KEY"),
-        timeout=httpx.Timeout(180.0, connect=10.0),
-        max_retries=3,
-    )
+def runway_client() -> RunwayML:
+    """Single Runway client. Drives all image, video, and SFX generation.
+
+    Reads `RUNWAYML_API_SECRET` from the environment (the SDK's default).
+    The skill helpers in runway-skills/ use the same env var name.
+    """
+    # The SDK reads RUNWAYML_API_SECRET automatically; we still resolve it
+    # here so we get our friendly missing-key error message.
+    _require_key("RUNWAYML_API_SECRET")
+    return RunwayML()
 
 
 @lru_cache(maxsize=1)
 def gemini_client():
-    """Drives Nano Banana 2 (image), Veo 3.1 (video), Gemini 3 Pro (critique)."""
+    """Critic-only Gemini 3 Pro client (long-video review in evaluate_film).
+
+    All image/video generation lives in Runway now; this client only exists
+    because Runway has no equivalent video-review LLM endpoint. If you don't
+    care about Reviewer A and only want Claude's stills review, you can
+    leave GOOGLE_AI_API_KEY blank and `evaluate_film` will degrade to a
+    one-reviewer score.
+    """
     from google import genai  # type: ignore
     return genai.Client(api_key=_require_key("GOOGLE_AI_API_KEY"))
-
-
-@lru_cache(maxsize=1)
-def elevenlabs_client():
-    from elevenlabs.client import ElevenLabs  # type: ignore
-    return ElevenLabs(api_key=_require_key("ELEVENLABS_API_KEY"))
 
 
 def _require_key(name: str) -> str:
@@ -292,34 +400,172 @@ class Experiment:
 # RUNTIME UTILITIES (used by produce.py)
 # ============================================================================
 
+# Runway data URI size caps, from docs.dev.runwayml.com/assets/inputs.
+# These are the *encoded* sizes; base64 inflates by ~33% so the binary
+# limit is ~75% of the encoded limit.
+_RUNWAY_DATA_URI_BYTES = {
+    "image": int(5 * 1024 * 1024 * 0.74),   # ~3.7 MB raw → 5 MB encoded
+    "video": int(16 * 1024 * 1024 * 0.74),  # ~11.8 MB raw → 16 MB encoded
+    "audio": int(32 * 1024 * 1024 * 0.74),  # ~23.7 MB raw → 32 MB encoded
+}
+
+
+def _kind_from_mime(mime: str) -> str:
+    if mime.startswith("image/"):
+        return "image"
+    if mime.startswith("video/"):
+        return "video"
+    if mime.startswith("audio/"):
+        return "audio"
+    return "image"
+
+
+def _ephemeral_upload(blob: bytes, mime: str) -> str:
+    """Upload bytes to Runway's ephemeral object storage and return the
+    `runway://` URI. Used when bytes exceed the data URI cap (5 MB image,
+    16 MB video, 32 MB audio). The URI is valid for 24 hours.
+
+    See https://docs.dev.runwayml.com/assets/uploads/ for the protocol —
+    POST /v1/uploads → presigned uploadUrl + fields + runwayUri, then
+    multipart-POST the file to uploadUrl.
+    """
+    api_key = _require_key("RUNWAYML_API_SECRET")
+    ext = {"image/png": "png", "image/jpeg": "jpg", "image/jpg": "jpg",
+           "image/webp": "webp", "video/mp4": "mp4", "video/quicktime": "mov",
+           "audio/wav": "wav", "audio/mpeg": "mp3", "audio/mp3": "mp3"}.get(mime, "bin")
+    filename = f"autofilm-{int(time.time() * 1000)}.{ext}"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "X-Runway-Version": "2024-11-06",
+        "Content-Type": "application/json",
+    }
+    init = httpx.post(
+        "https://api.dev.runwayml.com/v1/uploads",
+        headers=headers,
+        json={"filename": filename, "type": "ephemeral"},
+        timeout=30.0,
+    )
+    init.raise_for_status()
+    data = init.json()
+    upload_url = data["uploadUrl"]
+    fields = data.get("fields", {})
+    runway_uri = data["runwayUri"]
+    # Multipart POST to the presigned URL. Don't reuse the auth headers.
+    put = httpx.post(
+        upload_url,
+        data=fields,
+        files={"file": (filename, blob, mime)},
+        timeout=300.0,
+    )
+    put.raise_for_status()
+    return runway_uri
+
+
+def _runway_uri(blob: bytes, mime: str = "image/png") -> str:
+    """Encode bytes for a Runway request body.
+
+    Uses a base64 data URI when the payload fits within Runway's documented
+    size cap for that media type; falls back to an ephemeral upload (which
+    returns a `runway://` URI valid for 24h) when it doesn't.
+
+    This is the helper to use anywhere produce.py used to hand raw bytes
+    into a `prompt_image`, `reference_images[].uri`, or `video_uri` field.
+    """
+    kind = _kind_from_mime(mime)
+    if len(blob) <= _RUNWAY_DATA_URI_BYTES[kind]:
+        return f"data:{mime};base64,{base64.b64encode(blob).decode()}"
+    return _ephemeral_upload(blob, mime)
+
+
+# Back-compat shim: `_data_uri` was the original name in this file before
+# the upload-fallback was added. Some helpers below still reference it.
+def _data_uri(image_bytes: bytes, mime: str = "image/png") -> str:
+    return _runway_uri(image_bytes, mime)
+
+
 @api_retry
+def runway_image(
+    prompt: str,
+    reference_images: list[bytes] | None = None,
+    reference_tags: list[str] | None = None,
+    model: str = GEN4_IMAGE_MODEL,
+    ratio: str | None = None,
+) -> bytes:
+    """Generate an image via the Runway /v1/text_to_image endpoint.
+
+    Generic helper that backs `gpt_image()` and `nano_banana()` below; can
+    also be called directly to use `gen4_image` / `gen4_image_turbo`, which
+    have first-class reference-image support and are Runway's strongest
+    identity-lock models.
+
+    Args:
+        prompt: text description of the desired image.
+        reference_images: PNG/JPEG bytes for up to 3 reference images.
+        reference_tags: optional tags (3-16 lowercase chars) for each
+            reference; you can address them in the prompt as `@tag`. If
+            unset, tags `ref1`, `ref2`, `ref3` are auto-assigned.
+        model: Runway image model id. See the constants above.
+        ratio: pixel ratio string. Defaults to a sensible per-model value.
+    """
+    refs_payload: list[dict] = []
+    for i, img in enumerate((reference_images or [])[:3]):
+        tag = (reference_tags[i] if reference_tags and i < len(reference_tags) else f"ref{i+1}")
+        refs_payload.append({"tag": tag, "uri": _data_uri(img)})
+
+    if model == GEN4_IMAGE_TURBO and not refs_payload:
+        raise RuntimeError(
+            "gen4_image_turbo requires at least one reference image. "
+            "Pass reference_images=[..] or use gen4_image / gemini_image3_pro."
+        )
+
+    if ratio is None:
+        ratio = "1344:768" if model == GEMINI_FLASH_MODEL else _runway_ratio()
+
+    kwargs: dict[str, Any] = {
+        "model": model,
+        "prompt_text": prompt,
+        "ratio": ratio,
+    }
+    if refs_payload:
+        kwargs["reference_images"] = refs_payload
+
+    task = runway_client().text_to_image.create(**kwargs).wait_for_task_output()
+    if not task.output:
+        raise RuntimeError(f"Runway {model}: no output URL returned")
+    return httpx.get(task.output[0], timeout=120.0).content
+
+
 def gpt_image(prompt: str, size: str = "1792x1024", quality: str = "high") -> bytes:
-    """GPT Image 2 — best instruction-following image gen."""
-    resp = openai_client().images.generate(
-        model=GPT_IMAGE_MODEL,
-        prompt=prompt,
-        size=size,
-        quality=quality,
-        n=1,
-    )
-    return base64.b64decode(resp.data[0].b64_json)  # type: ignore[union-attr]
+    """GPT Image 2 — best instruction-following image gen, via Runway.
+
+    Backwards-compatible signature for produce.py. The `size` and `quality`
+    args are accepted for compatibility but mapped onto Runway's pixel-ratio
+    system (1K / 2K / 4K) since Runway exposes `gpt_image_2` with a fixed
+    quality=high default and resolution-based pricing.
+    """
+    # Map old OpenAI size strings onto Runway pixel ratios. The original
+    # autofilm only ever called with "1792x1024" (16:9 ~2K). Map to 1080p.
+    if size in ("1792x1024", "1920x1080", "1664x912"):
+        ratio = "1920:1080"
+    elif size in ("1024x1792", "1080x1920"):
+        ratio = "1080:1920"
+    elif size in ("1024x1024",):
+        ratio = "1024:1024"
+    else:
+        ratio = _runway_ratio()
+    _ = quality  # unused — Runway's gpt_image_2 always uses quality=high
+    return runway_image(prompt, model=GPT_IMAGE_MODEL, ratio=ratio)
 
 
-@api_retry
 def nano_banana(prompt: str, reference_images: list[bytes] | None = None) -> bytes:
-    """Nano Banana 2 — identity locking, multi-image fusion (up to 14 elements)."""
-    from google.genai import types  # type: ignore
-    parts: list = [prompt]
-    for img in (reference_images or [])[:8]:
-        parts.append(types.Part.from_bytes(data=img, mime_type="image/png"))
-    resp = gemini_client().models.generate_content(
-        model=NANO_BANANA_MODEL,
-        contents=parts,
-    )
-    for part in resp.candidates[0].content.parts:
-        if getattr(part, "inline_data", None):
-            return part.inline_data.data
-    raise RuntimeError("Nano Banana 2: no image returned")
+    """Nano Banana — Gemini Image 3 Pro via Runway.
+
+    Identity locking and multi-image fusion. Up to 3 reference images,
+    matching Runway's referenceImages cap (the old direct API allowed up
+    to 14 elements; this is a small regression but the gen4_image refs
+    system more than compensates for character continuity).
+    """
+    return runway_image(prompt, reference_images=reference_images, model=NANO_BANANA_MODEL)
 
 
 @api_retry
@@ -332,50 +578,73 @@ def veo(
     resolution: str | None = None,
     seed: int | None = None,
 ) -> bytes:
-    """Veo 3.1 image-to-video with native synchronized audio."""
-    from google.genai import types  # type: ignore
-    client = gemini_client()
-    start_image = types.Image(image_bytes=first_frame, mime_type="image/png")
-    refs = [
-        types.VideoGenerationReferenceImage(
-            image=types.Image(image_bytes=r, mime_type="image/png"),
-            reference_type="asset",
-        )
-        for r in (reference_images or [])[:3]
-    ]
-    cfg: dict = {
-        "aspect_ratio": ASPECT_RATIO,
-        "resolution": resolution or VEO_RESOLUTION,
-        "duration_seconds": duration_seconds or SHOT_DURATION_SECONDS,
+    """Image-to-video generation via Runway.
+
+    Default model is veo3.1_fast (matches the old direct-Google path
+    1:1 in cost and capability). Pass `model=GEN45_MODEL` or
+    `model=SEEDANCE2_MODEL` to use Runway-native alternatives that
+    accept reference images directly (Veo on Runway does not).
+    """
+    target_model = model or veo_final_model()
+    duration = duration_seconds or SHOT_DURATION_SECONDS
+    ratio = _runway_ratio(resolution=resolution or VEO_RESOLUTION, model=target_model)
+
+    # Look up duration constraints for this model.
+    model_meta = next((m for m in VIDEO_MODELS.values() if m["id"] == target_model), None)
+    if model_meta:
+        duration = _snap_to_options(duration, model_meta["duration_options"])
+
+    kwargs: dict[str, Any] = {
+        "model": target_model,
+        "prompt_text": prompt,
+        "prompt_image": _data_uri(first_frame),
+        "ratio": ratio,
+        "duration": duration,
     }
-    if refs:
-        cfg["reference_images"] = refs
     if seed is not None:
-        cfg["seed"] = seed
-    op = client.models.generate_videos(
-        model=model or veo_final_model(),
-        prompt=prompt,
-        image=start_image,
-        config=types.GenerateVideosConfig(**cfg),
-    )
-    deadline = time.time() + 600
-    while not op.done:
-        if time.time() > deadline:
-            raise TimeoutError(f"Veo operation {op.name} did not complete")
-        time.sleep(8)
-        op = client.operations.get(op)
-    video = op.result.generated_videos[0].video
-    try:
-        b = client.files.download(file=video)
-        if isinstance(b, bytes):
-            return b
-    except Exception:
-        pass
-    if hasattr(video, "video_bytes") and video.video_bytes:
-        return video.video_bytes
-    if hasattr(video, "uri") and video.uri:
-        return httpx.get(video.uri, timeout=120).content
-    raise RuntimeError("Veo: could not extract video bytes")
+        kwargs["seed"] = seed
+
+    # gen4.5 / seedance2 accept native reference_images; Veo on Runway
+    # does not, so for Veo we silently drop refs and rely on the first
+    # frame for identity (which is what the old pipeline did anyway).
+    if reference_images and model_meta and model_meta.get("supports_refs"):
+        kwargs["reference_images"] = [
+            {"tag": f"ref{i+1}", "uri": _data_uri(r)}
+            for i, r in enumerate(reference_images[:3])
+        ]
+
+    task = runway_client().image_to_video.create(**kwargs).wait_for_task_output()
+    if not task.output:
+        raise RuntimeError(f"Runway {target_model}: no output URL returned")
+    return httpx.get(task.output[0], timeout=300.0).content
+
+
+@api_retry
+def aleph_video_to_video(
+    prompt: str,
+    input_video: bytes,
+    reference_image: bytes | None = None,
+) -> bytes:
+    """Gen-4 Aleph — video-to-video transformation via Runway.
+
+    NEW capability the old pipeline didn't have. Useful as a per-shot
+    grading or restyling pass: feed in a rendered Veo clip, ask Aleph to
+    re-grade it warmer, change the lighting key, or transform the
+    location seasonally. Costs 15 credits/sec ($0.15/sec) on top of the
+    original generation, so use sparingly — most of the time the
+    LOOKBOOK_GRADE ffmpeg chain is the right (free) tool.
+    """
+    kwargs: dict[str, Any] = {
+        "model": GEN4_ALEPH_MODEL,
+        "prompt_text": prompt,
+        "video_uri": _data_uri(input_video, mime="video/mp4"),
+    }
+    if reference_image is not None:
+        kwargs["reference_images"] = [{"tag": "style", "uri": _data_uri(reference_image)}]
+    task = runway_client().video_to_video.create(**kwargs).wait_for_task_output()
+    if not task.output:
+        raise RuntimeError("Aleph: no output URL returned")
+    return httpx.get(task.output[0], timeout=300.0).content
 
 
 @api_retry
@@ -399,7 +668,10 @@ def claude_tool(system: str, user_content: Any, tool_name: str, tool_schema: dic
 
 @api_retry
 def stable_audio(prompt: str, duration_seconds: int = 30) -> bytes:
-    """Stability Stable Audio 2.5 — instrumental cinematic cues."""
+    """Stability Stable Audio 2.5 — instrumental cinematic cues.
+
+    Kept on the direct Stability API; Runway has no music model.
+    """
     api_key = _require_key("STABILITY_API_KEY")
     resp = httpx.post(
         "https://api.stability.ai/v2beta/audio/stable-audio-2/text-to-audio",
@@ -414,13 +686,40 @@ def stable_audio(prompt: str, duration_seconds: int = 30) -> bytes:
 
 @api_retry
 def elevenlabs_sfx(prompt: str, duration_seconds: int = 10) -> bytes:
-    """ElevenLabs Sound Effects — ambient beds and Foley."""
-    el = elevenlabs_client()
-    audio_iter = el.text_to_sound_effects.convert(
-        text=prompt,
-        duration_seconds=min(max(duration_seconds, 1), 22),
-    )
-    return b"".join(audio_iter)
+    """ElevenLabs sound effects via Runway's /v1/sound_effect endpoint.
+
+    Runway proxies the eleven_text_to_sound_v2 model and bills 1 credit
+    per provided second (or 2 credits with no duration). Output is MP3;
+    we transcode to WAV at the call site if needed.
+    """
+    duration = max(1, min(int(duration_seconds), 22))
+    task = runway_client().sound_effect.create(
+        model=RUNWAY_SFX_MODEL,
+        prompt_text=prompt,
+        duration_seconds=duration,
+    ).wait_for_task_output()
+    if not task.output:
+        raise RuntimeError("Runway SFX: no output URL returned")
+    return httpx.get(task.output[0], timeout=120.0).content
+
+
+@api_retry
+def runway_tts(text: str, voice_id: str = "Maya") -> bytes:
+    """ElevenLabs text-to-speech via Runway's /v1/text_to_speech endpoint.
+
+    NEW capability — useful for narrator/voiceover that the old pipeline
+    couldn't generate (Veo's native audio only covers in-frame dialogue).
+    1 credit per 50 chars (~$0.01). produce.py doesn't call this by
+    default; expose it to the agent via the import surface.
+    """
+    task = runway_client().text_to_speech.create(
+        model="eleven_multilingual_v2",
+        prompt_text=text,
+        voice={"type": "runway-preset", "preset_id": voice_id},
+    ).wait_for_task_output()
+    if not task.output:
+        raise RuntimeError("Runway TTS: no output URL returned")
+    return httpx.get(task.output[0], timeout=120.0).content
 
 
 def ffmpeg(args: list[str]) -> None:
@@ -468,32 +767,44 @@ def route_shot(
     desired_seconds: float,
     tier: str = "fast",
 ) -> dict:
-    """Pick which Veo tier renders a shot.
+    """Pick which video model renders a shot.
 
     Args:
-        desired_seconds: how long the shot should be on screen (capped at 8).
-        tier: "fast" | "standard" | "previs". Standard is Veo Quality at
-              ~$0.40/sec for hero shots; previs is Veo Lite at ~$0.07/sec
-              for cheap blocking validation.
+        desired_seconds: how long the shot should be on screen.
+        tier: which model family to use.
+            - "previs"   → veo3.1_fast at $0.15/sec (Runway has no Lite)
+            - "fast"     → veo3.1_fast at $0.15/sec, native dialogue audio
+            - "standard" → veo3.1 at $0.40/sec, native dialogue audio
+            - "gen4.5"   → Runway Gen-4.5 at $0.12/sec, native ref-image lock
+            - "seedance2"→ Seedance 2 at $0.36/sec, up to 15s in one call
 
     Returns a routing dict:
         {
           "model_key": str,           # key into VIDEO_MODELS
           "model_id":  str,           # the actual model identifier
-          "segments":  [int],         # always single-element since cap is 8s
+          "segments":  [int],         # always single-element since we don't chain
           "estimated_cost": float,    # USD
           "rationale": str,           # for the bible / debugging
         }
     """
     desired_seconds = max(1, min(desired_seconds, MAX_PLANNED_SHOT_SECONDS))
 
-    if tier == "previs":
-        model_key = "veo3.1_lite"
-    elif tier == "standard":
-        model_key = "veo3.1_standard"
-    else:
-        model_key = "veo3.1_fast"
+    tier_to_key = {
+        "previs":    "veo3.1_lite",     # alias, same id as fast
+        "fast":      "veo3.1_fast",
+        "standard":  "veo3.1_standard",
+        "gen4.5":    "gen4.5",
+        "gen45":     "gen4.5",          # convenience alias
+        "seedance2": "seedance2",
+        "seedance":  "seedance2",
+    }
+    model_key = tier_to_key.get(tier, "veo3.1_fast")
     m = VIDEO_MODELS[model_key]
+
+    # seedance2 lets us bust the 8s cap; everything else still snaps to ≤8s.
+    if model_key == "seedance2":
+        desired_seconds = max(1, min(desired_seconds, m["max_seconds"]))
+
     d = _snap_to_options(desired_seconds, m["duration_options"])
     return {
         "model_key": model_key,

@@ -65,67 +65,90 @@ def check_anthropic() -> bool:
         return False
 
 
-def check_openai() -> bool:
-    key = os.getenv("OPENAI_API_KEY", "")
-    if not key or key.startswith("sk-proj-...") or key == "":
-        line("OPENAI_API_KEY", "FAIL", "missing — see SETUP.md §4b")
+def check_runway() -> bool:
+    key = os.getenv("RUNWAYML_API_SECRET", "")
+    if not key or key.startswith("key_..."):
+        line("RUNWAYML_API_SECRET", "FAIL", "missing — see SETUP.md §4b")
         return False
     try:
-        from openai import OpenAI
-        client = OpenAI(api_key=key)
-        models = list(client.models.list().data)
-        ids = {m.id for m in models}
-        # gpt-image-2 only appears for verified orgs.
-        if "gpt-image-2" in ids:
-            line("OPENAI_API_KEY", "OK",
-                 f"org verified, {len(ids)} models incl. gpt-image-2")
+        import httpx
+        # Runway exposes an /v1/organization endpoint that returns the
+        # caller's org info + credit balance — free, fast, and validates
+        # the key in one call. See docs.dev.runwayml.com/api-details/.
+        r = httpx.get(
+            "https://api.dev.runwayml.com/v1/organization",
+            headers={
+                "Authorization": f"Bearer {key}",
+                "X-Runway-Version": "2024-11-06",
+            },
+            timeout=10,
+        )
+        if r.status_code == 401:
+            line("RUNWAYML_API_SECRET", "FAIL",
+                 "invalid key (401) — re-issue at dev.runwayml.com")
+            return False
+        if r.status_code == 404:
+            # Older versions of the API may not expose /organization;
+            # fall back to listing tasks (also auth'd) to validate.
+            r = httpx.get(
+                "https://api.dev.runwayml.com/v1/tasks",
+                headers={
+                    "Authorization": f"Bearer {key}",
+                    "X-Runway-Version": "2024-11-06",
+                },
+                timeout=10,
+            )
+            if r.status_code == 401:
+                line("RUNWAYML_API_SECRET", "FAIL", "invalid key (401)")
+                return False
+            r.raise_for_status()
+            line("RUNWAYML_API_SECRET", "OK", "key reachable")
             return True
-        if "gpt-image-1" in ids:
-            line("OPENAI_API_KEY", "WARN",
-                 "key works but gpt-image-2 not visible — verify your org "
-                 "(SETUP.md §4b step 3); gpt-image-1 is the older fallback")
-            return True
-        line("OPENAI_API_KEY", "WARN",
-             f"key works but no gpt-image-* models visible — "
-             f"org likely unverified (SETUP.md §4b step 3)")
+        r.raise_for_status()
+        data = r.json()
+        # The response shape varies by API version; surface what we can.
+        credits = data.get("creditBalance") or data.get("credits") or data.get("usageBalance")
+        tier = data.get("tier") or data.get("usageTier")
+        bits = []
+        if credits is not None:
+            # Runway credits = $0.01 each. A default 3-scene run is ~2,800 credits ($28).
+            bits.append(f"{credits} credits (${credits / 100:.2f})")
+        if tier:
+            bits.append(f"tier {tier}")
+        detail = ", ".join(bits) if bits else "key reachable"
+        line("RUNWAYML_API_SECRET", "OK", detail)
+        if credits is not None and credits < 600:
+            line("RUNWAYML_API_SECRET", "WARN",
+                 f"low balance — a default run costs ~2,800 credits ($28). Top up.")
         return True
     except Exception as e:  # noqa: BLE001
         msg = str(e).split("\n")[0][:120]
-        line("OPENAI_API_KEY", "FAIL", msg)
+        line("RUNWAYML_API_SECRET", "FAIL", msg)
         return False
 
 
 def check_google() -> bool:
-    key = os.getenv("GOOGLE_AI_API_KEY", "")
-    if not key or key.startswith("AIza...") or key == "":
-        line("GOOGLE_AI_API_KEY", "FAIL", "missing — see SETUP.md §4c")
-        return False
+    """Critic-only: Gemini 3 Pro for long-video review in evaluate_film.
+
+    The agent can disable this and run with Claude-stills as the sole
+    reviewer if they want. Optional rather than required.
+    """
+    key = os.getenv("GOOGLE_AI_API_KEY", "").strip()
+    if not key or key.startswith("AIza..."):
+        line("GOOGLE_AI_API_KEY", "SKIP",
+             "optional — long-video critic disabled "
+             "(Claude stills review still runs)")
+        return True
     try:
         from google import genai  # type: ignore
         client = genai.Client(api_key=key)
-        # A 1-token gemini call validates the key. Free under quota.
-        resp = client.models.generate_content(
+        # 1-token reachability check, free under quota.
+        client.models.generate_content(
             model="gemini-3-pro",
             contents="ok",
             config={"max_output_tokens": 1},
         )
-        # Probe Veo availability separately. The list_models call is free
-        # and returns whatever models the project has access to. Veo only
-        # shows up if billing is enabled.
-        try:
-            available = {m.name for m in client.models.list()}
-            has_veo = any("veo-3.1" in n for n in available)
-            if has_veo:
-                line("GOOGLE_AI_API_KEY", "OK",
-                     "billing enabled, veo-3.1 + gemini-3-pro available")
-            else:
-                line("GOOGLE_AI_API_KEY", "WARN",
-                     "key works for Gemini but Veo 3.1 not listed — "
-                     "enable billing (SETUP.md §4c step 5)")
-        except Exception:  # noqa: BLE001
-            # list_models can be flaky depending on project shape; fall
-            # back to "key works" if we got the gemini reply.
-            line("GOOGLE_AI_API_KEY", "OK", "gemini-3-pro reachable")
+        line("GOOGLE_AI_API_KEY", "OK", "gemini-3-pro reachable (critic enabled)")
         return True
     except ImportError:
         line("GOOGLE_AI_API_KEY", "FAIL",
@@ -137,42 +160,10 @@ def check_google() -> bool:
         return False
 
 
-def check_elevenlabs() -> bool:
-    key = os.getenv("ELEVENLABS_API_KEY", "").strip()
-    if not key or key.startswith("sk_..."):
-        line("ELEVENLABS_API_KEY", "SKIP",
-             "optional — ambient SFX layer disabled "
-             "(Veo's native audio + music still cover scenes)")
-        return True  # optional, never fails the check
-    try:
-        import httpx
-        r = httpx.get(
-            "https://api.elevenlabs.io/v1/user/subscription",
-            headers={"xi-api-key": key},
-            timeout=10,
-        )
-        if r.status_code == 401:
-            line("ELEVENLABS_API_KEY", "FAIL", "invalid key (401)")
-            return False
-        r.raise_for_status()
-        sub = r.json()
-        tier = sub.get("tier", "unknown")
-        used = sub.get("character_count", 0)
-        cap = sub.get("character_limit", 0)
-        left = max(cap - used, 0)
-        line("ELEVENLABS_API_KEY", "OK",
-             f"{tier} plan, {left:,} chars left")
-        return True
-    except Exception as e:  # noqa: BLE001
-        msg = str(e).split("\n")[0][:120]
-        line("ELEVENLABS_API_KEY", "FAIL", msg)
-        return False
-
-
 def check_stability() -> bool:
     key = os.getenv("STABILITY_API_KEY", "")
     if not key or key.startswith("sk-...") or key == "":
-        line("STABILITY_API_KEY", "FAIL", "missing — see SETUP.md §4e")
+        line("STABILITY_API_KEY", "FAIL", "missing — see SETUP.md §4d")
         return False
     try:
         import httpx
@@ -262,9 +253,8 @@ def main() -> int:
 
     api_results = [
         check_anthropic(),
-        check_openai(),
+        check_runway(),
         check_google(),
-        check_elevenlabs(),
         check_stability(),
     ]
     print()

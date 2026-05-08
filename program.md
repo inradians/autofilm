@@ -28,7 +28,7 @@ Two helpers, also fixed scaffolding:
 | continuity | 0.15 | Visual + character + spatial continuity |
 | fidelity | 0.15 | Faithfulness to the source novel |
 
-Two reviewers score each axis (Gemini 3 Pro on the actual video, Claude Opus 4.7 on stills) and the scores are averaged. CLIP character-drift is reported informationally but does not change `film_loss` directly.
+Two reviewers score each axis (Gemini 3 Pro on the actual video, Claude Opus 4.7 on stills) and the scores are averaged. CLIP character-drift is reported informationally but does not change `film_loss` directly. If `GOOGLE_AI_API_KEY` is unset, only Claude reviews — the metric is still produced, just from a single reviewer.
 
 ## The loop
 
@@ -48,9 +48,58 @@ Two reviewers score each axis (Gemini 3 Pro on the actual video, Claude Opus 4.7
 
 ## Cost & time per experiment
 
-Each experiment with default `produce.py` costs roughly **$25-50** and takes **15-25 minutes** (mostly Veo 3.1 Fast video generation). At `MAX_SCENES=3` and `TAKES_PER_SHOT=1` you're at the cheap end.
+Each experiment with default `produce.py` costs roughly **$25-50** and takes **15-25 minutes** (mostly Runway video generation). At `MAX_SCENES=3` and `TAKES_PER_SHOT=1` you're at the cheap end.
 
-Watch your spend. The loop is expensive enough that you should not run more than ~5 experiments per night without explicit human approval.
+Watch your spend. The loop is expensive enough that you should not run more than ~5 experiments per night without explicit human approval. All image/video/SFX is billed as Runway credits at $0.01 each — check the dashboard at https://dev.runwayml.com/ if you want a real-time view.
+
+## The model menu
+
+The Runway-consolidated stack gives you several knobs that didn't exist in the original pipeline. **Read this section before your first iteration** — half the high-leverage moves below depend on knowing which model to pick.
+
+### Video models (set via `VEO_TIER` env var or call `route_shot(.., tier=...)` directly)
+
+| Tier | Model | Cost/sec | Has dialogue audio? | Native ref-image support? | When to use |
+|---|---|---|---|---|---|
+| `previs` | `veo3.1_fast` | $0.15 | yes | no | cheap blocking validation (same as `fast`, kept for legacy) |
+| `fast` *(default)* | `veo3.1_fast` | $0.15 | yes | no | every iteration |
+| `standard` | `veo3.1` | $0.40 | yes | no | hero shot or final delivery |
+| `gen4.5` | `gen4.5` | $0.12 | **no** | **yes** | identity-lock matters more than dialogue |
+| `seedance2` | `seedance2` | $0.36 | no | yes | a beat that genuinely needs >8s in one cut |
+
+**Picking between them based on critique:**
+
+- "Faces drift across shots" / "character X looks different in shots A/B/C" → switch a few shots to `gen4.5` and pass the actor's reference image as an asset. Native multi-image identity lock is what Runway is famous for.
+- "Lip-sync is off" / "dialogue feels disconnected" → stay on Veo Fast/Standard (only ones with native synced dialogue audio). Tighten the dialogue block in `veo_prompt()`.
+- "This long beat would land better as a oner" → escalate that *one shot* to `seedance2` at 12-15s. Don't escalate the whole film — it's 2.4× the cost.
+- "Acting flat" → bump `TAKES_PER_SHOT=3` (more options for the editor) before changing the model.
+- "Color drifts between shots" → tune `LOOKBOOK_GRADE` first; if that's not enough, use `aleph_video_to_video()` as a per-shot regrade.
+
+### Image models (used by `gpt_image()`, `nano_banana()`, `runway_image()`)
+
+| Model id | Cost | Native references? | When to use |
+|---|---|---|---|
+| `gpt_image_2` | 1–41 c (high@1K=20) | optional, up to 3 | first-frame composition — strongest instruction-following |
+| `gemini_image3_pro` | 20 c @ 1K/2K | optional, up to 3 | identity lock, multi-image fusion |
+| `gen4_image` | 5 c @ 720p, 8 c @ 1080p | optional, up to 3 | Runway's flagship — strong character continuity |
+| `gen4_image_turbo` | 2 c | **required** | cheap iteration when you already have refs |
+| `gemini_2.5_flash` | 5 c | optional, up to 3 | Nano Banana, fastest |
+
+**`gen4_image` with reference images is the single biggest continuity unlock.** The original pipeline emulated this by chaining `gpt_image` → `nano_banana(refs)`. The new direct path is one call: `runway_image(prompt, reference_images=[actor_png], reference_tags=["jane"], model=GEN4_IMAGE_MODEL)`. Then in the prompt you can address that ref as `@jane`. If continuity is the dominant axis flagged by the critic, route `build_first_frames()` through `gen4_image` instead of the legacy `gpt_image → nano_banana` chain.
+
+### Video-to-video transformation (NEW)
+
+`aleph_video_to_video(prompt, input_video_bytes, reference_image=None)` runs Gen-4 Aleph at 15 c/s ($0.15/s) on top of an existing clip. Use cases the old pipeline couldn't do:
+
+- **Per-shot regrade** when the global ffmpeg `LOOKBOOK_GRADE` chain doesn't hit a specific shot well. Ask for "warm golden hour, soft contrast" and Aleph rewrites the lighting.
+- **Seasonal/temporal transformation** — same blocking, different time of day or weather.
+- **Stylistic recovery** — when one shot ended up looking like a different film than the rest, regrade just that one.
+
+Don't chain Aleph reflexively — it doubles the cost of the affected shot and adds 1-2 minutes of wall-clock. Use it when the critic explicitly flags a per-shot color or lighting failure.
+
+### Audio additions
+
+- `elevenlabs_sfx(prompt, duration_seconds)` — ambient bed; off by default, enable with `AMBIENT_SFX_ENABLED=1`.
+- `runway_tts(text, voice_id)` — **NEW** narrator/voiceover. Veo's native audio only covers in-frame dialogue. If you want an opening voiceover or letter-reading montage, this is the tool.
 
 ## Where to make changes
 
@@ -61,9 +110,11 @@ The critic's `changes` list names targets specific to `produce.py`. Common high-
 - **`LOOKBOOK_STYLE_KEYWORDS`** — short tokens prepended to every image/video prompt. Adding "shallow depth of field" or "motivated practical light" propagates everywhere.
 - **`LOOKBOOK_PROMPT`** — what Claude is asked to produce as the visual bible. Editing this changes lens package, lighting style, reference films cited.
 - **`SHOTLIST_SYSTEM`** / `shot_list_for_scene` — the system prompt that breaks scenes into shots. If `cinematography` is high, the issue is often shot variety: too many medium shots, no inserts, no coverage of reactions. The prompt enforces a hard 4/6/8 second duration choice.
-- **Shot duration is capped at 8 seconds** — Veo 3.1's native single-call limit. The schema allows only `{4, 6, 8}`. Long beats are covered by multiple shots, not by extending one. `route_shot()` in `prepare.py` picks the Veo tier (Lite/Fast/Standard) based on `VEO_TIER`; you don't edit it.
-- **`first_frame_prompt`** — the long prompt fed to GPT Image 2 + Nano Banana 2. If `continuity` is high (faces drifting), strengthen the identity-lock instruction.
-- **`veo_prompt`** — the Veo prompt per shot/take. If `acting` or `sound` is high, dialogue blocks and performance hints live here.
+- **Shot duration is capped at 8 seconds** unless you explicitly route via `seedance2`. The schema for Veo allows only `{4, 6, 8}`. Long beats are covered by multiple shots, not by extending one. `route_shot()` in `prepare.py` picks the tier based on `VEO_TIER`; you don't edit it, you just pass `tier=...` per shot when you want to deviate from the global default.
+- **`first_frame_prompt`** — the long prompt fed to the image generator. If `continuity` is high (faces drifting), this is your primary lever. Two moves:
+  1. Strengthen the identity-lock instruction in the prompt itself.
+  2. Switch the image call from `gpt_image` → `runway_image(.., reference_images=[ref], model=GEN4_IMAGE_MODEL)` so refs go in via Runway's native referenceImages slot rather than the legacy nano-banana chain.
+- **`veo_prompt`** — the prompt per shot/take. If `acting` or `sound` is high, dialogue blocks and performance hints live here.
 - **`TAKE_VARIATIONS`** — per-take performance modifiers. Adding `"More urgency, faster blinks, shallower breath"` gives the editor different reads.
 - **`MUSIC_STYLE`** — global music tone. If `sound` axis flags music, edit here.
 - **Constants in `prepare.py`** — `TAKES_PER_SHOT`, `VEO_TIER`, `VEO_RESOLUTION`. These you CAN bump up via env vars when you want to throw more money at quality, but they're not in `produce.py` — set them in the shell before running.
@@ -71,9 +122,10 @@ The critic's `changes` list names targets specific to `produce.py`. Common high-
 ## Discipline
 
 - One or two changes per experiment, not five. You need to be able to attribute the delta in `film_loss` to a specific change.
-- Keep a running log in `LOG.md` (you create and maintain this) of: experiment id, film_loss, what you changed, what the critic said, what you'll try next.
+- Keep a running log in `LOG.md` (already scaffolded — append to it) of: experiment id, film_loss, what you changed, what the critic said, what you'll try next.
 - If `film_loss` plateaus for 3 experiments in a row, change strategy or escalate to the human.
-- If a stage in `produce.py` keeps failing for environmental reasons (API errors, timeout, etc.), don't iterate around it — flag it to the human.
+- If a stage in `produce.py` keeps failing for environmental reasons (API errors, timeout, etc.), don't iterate around it — flag it to the human. The pipeline is designed to crash loudly on infrastructure problems.
+- **Don't change the video model on every run.** Switching `VEO_TIER=fast` ↔ `gen4.5` is a structural change — every shot rerolls. Use it deliberately when the critic specifically flags continuity, not as a vibes-based toggle.
 
 ## Workflow
 
@@ -95,11 +147,13 @@ The bible PDF is your debugging tool — flip through it and you'll see the look
 ## Notable patterns in the critic's output
 
 - "Skin tones reading too cool" → tune `LOOKBOOK_GRADE` warm-midtone offset (`rm`/`gm`/`bm`).
-- "Character X looks different in shots A/B/C" → strengthen `nano_banana` reference pass in `build_first_frames`, or add more `actor_photos/`.
+- "Character X looks different in shots A/B/C" → switch first-frame generation to `gen4_image` with a stable reference image for X. Or strengthen the existing nano-banana lock.
 - "Dialogue muddy under music" → reduce music volumex in `compile_final` from 0.20 to 0.12.
 - "Pacing slack in scene N" → tighten `out_seconds` in EDL via `EDIT_SYSTEM` prompt asking for tighter cuts.
 - "Shots too samey" → adjust `SHOTLIST_SYSTEM` to demand more size/angle variety.
 - "Acting flat in close-ups" → expand `TAKE_VARIATIONS` with stronger emotional modifiers, bump `TAKES_PER_SHOT` env var.
+- "Lighting wrong on shot M" (single shot) → wrap that shot in `aleph_video_to_video()` as a regrade pass before EDL assembly.
+- "This shot needs to breathe" (single oner) → escalate that one shot's tier to `seedance2` for a 12-15s single take.
 
 ## When to stop
 

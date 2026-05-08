@@ -1,10 +1,10 @@
 # autofilm
 
-*One day, films were made by meat computers in coordinated rituals called "shoots". They synchronized over multi-month schedules, eating craft service and arguing about lens choice. That era is fading. Films are now drafted by autonomous swarms of AI agents iterating overnight against a single critic-derived scalar. The agents claim we are now in the 47th iteration of the look book, in any case the production designer has been replaced by a markdown file. This repo is one of the first ones.*
+*One day, films were made by meat computers in coordinated rituals called "shoots". They synchronized over multi-month schedules, eating craft service and arguing about lens choice. That era is fading. Films are now drafted by autonomous swarms of AI agents iterating overnight against a single critic-derived scalar. The agents claim we are now in the 47th iteration of the look book; in any case the production designer has been replaced by a markdown file. This repo is one of the first ones.*
 
 The idea: give an AI agent a small but real virtual-production setup and let it experiment autonomously. It edits the creative parameters, runs the full pipeline (book → screenplay → cast → look book → storyboard → frames → video → edit → final mix), gets a critic-derived `film_loss` score, keeps or discards changes, and repeats. You wake up to a log of experiments and (hopefully) a better short film.
 
-The pipeline here is a single-book, single-output adaptation built on the SOTA April-2026 stack: **Claude Opus 4.7** + **GPT Image 2** + **Nano Banana 2** + **Veo 3.1**. The core idea is that you're not touching most Python files like you normally would — you're programming the `program.md` markdown file that provides context to the agent and edits to `produce.py` that the agent makes between experiments.
+The pipeline runs on the SOTA May-2026 stack, **consolidated through Runway**: a single Runway API key replaces what used to be four separate provider integrations (OpenAI for GPT Image 2, Google AI for Nano Banana 2 + Veo 3.1, ElevenLabs for SFX). Anthropic for Claude Opus 4.7 and Stability for Stable Audio 2.5 are kept on direct APIs. Total: **3 keys instead of 5**, **0 approval delays instead of 2** (no more OpenAI org verification or Google Cloud billing for video).
 
 ## How it works
 
@@ -18,7 +18,7 @@ By design, each experiment runs on a **fixed scene budget** (`MAX_SCENES=3` by d
 
 ## Quick start
 
-**First time?** Read [`SETUP.md`](SETUP.md) — it walks through every API key (with the gotchas that take real debugging time, like OpenAI org-verification for `gpt-image-2` and Google Cloud billing for Veo 3.1), system prerequisites, the optional director/cinematographer creative-direction knobs, and a verification script that confirms everything works before you spend money on a run.
+**First time?** Read [`SETUP.md`](SETUP.md) — three keys, no approval delays, ~15 minutes to a green setup-check.
 
 Once you've completed setup:
 
@@ -26,7 +26,7 @@ Once you've completed setup:
 # Verify keys + ffmpeg + book pdf (well under a cent, ~10 sec)
 python scripts/check_setup.py
 
-# Run a cheap first experiment (~$5-8, ~10 min)
+# Run a cheap first experiment (~$5-7, ~10 min)
 MAX_SCENES=1 uv run produce.py
 
 # Score it (the bible PDF rebuilds with the critique section)
@@ -37,7 +37,7 @@ open experiments/exp_001/bible.pdf
 cat experiments/exp_001/critique.md
 ```
 
-Once that loop confirms end-to-end, drop `MAX_SCENES=1` for the default 3-scene runs (~$28 each).
+Once that loop confirms end-to-end, drop `MAX_SCENES=1` for the default 3-scene runs (~$27 each).
 
 ## Running the agent
 
@@ -45,7 +45,30 @@ Open Claude Code, Codex, Cursor, or your agent of choice in this repo (and disab
 
 > Have a look at program.md and let's kick off the loop. Run one experiment first to confirm everything works, then iterate.
 
-`program.md` is the lightweight skill the agent reads. It tells the agent how to read prior `metric.json` files, what knobs to tune in `produce.py`, and when to stop.
+`program.md` is the lightweight skill the agent reads. It tells the agent how to read prior `metric.json` files, what knobs to tune in `produce.py`, when to switch between Runway video models, and when to stop. The `.claude/skills/` directory ships vendored Runway skills (`rw-generate-video`, `rw-generate-image`, `rw-generate-audio`) that Claude Code auto-discovers — useful when you want the agent to make one-off generations outside the main pipeline.
+
+## The stack
+
+| Stage | Model | Provider | Cost (default run) |
+|---|---|---|---|
+| Script parsing, casting, look book, edit decisions | Claude Opus 4.7 | Anthropic | ~$5 |
+| First-frame composition | `gpt_image_2` | Runway | ~$2 |
+| Identity-lock / character refs | `gemini_image3_pro` (Nano Banana) | Runway | ~$2 |
+| Per-shot video generation | `veo3.1_fast` | Runway | ~$15 |
+| Music score | Stable Audio 2.5 | Stability | ~$1 |
+| Ambient SFX (off by default) | `eleven_text_to_sound_v2` | Runway | ~$1 |
+| Long-video critic | Gemini 3 Pro | Google AI (optional) | ~$1 |
+| Stills critic | Claude Opus 4.7 | Anthropic | (rolled into Anthropic line) |
+| **per default experiment** | | | **~$27** |
+
+**Alternative video models the agent can switch into:**
+
+- `gen4.5` (12 c/s, $0.12/s) — Runway flagship with **native reference-image support**. Cheaper than Veo Fast and stronger at character continuity. Trade-off: no native dialogue audio, so spoken scenes need TTS layered in.
+- `seedance2` (36 c/s, $0.36/s) — supports up to **15 seconds in a single call**, busting the 8-second Veo cap. Use sparingly for long beats.
+- `gen4_aleph` (15 c/s, $0.15/s) — **video-to-video transformation**. Apply per-shot color/mood/seasonal grading on top of generated clips when the global ffmpeg `LOOKBOOK_GRADE` chain isn't enough.
+- `veo3.1` (40 c/s with audio, $0.40/s) — hero-quality delivery tier.
+
+Switch via `VEO_TIER=fast | standard | gen4.5 | seedance2 | previs` in `.env`, or per-shot inside `produce.py` by calling `route_shot(duration, tier="gen4.5")`.
 
 ## Project structure
 
@@ -56,11 +79,13 @@ evaluate.py       — runs the critic over a finished film
 bible.py          — generates a production-bible PDF for an experiment
 program.md        — agent instructions (human modifies this)
 SETUP.md          — first-time setup walkthrough (read this first)
+CHANGELOG.md      — migration history
 README.md         — this file
 .env.example      — required API keys + optional creative direction
 pyproject.toml    — dependencies
 scripts/
   check_setup.py  — verifies keys, ffmpeg, and book PDF before a run
+.claude/skills/   — vendored Runway skills (auto-discovered by Claude Code)
 experiments/
   exp_001/
     produce.py    ← snapshot of what produced this run
@@ -74,7 +99,7 @@ experiments/
     clips/{scene}/{shot}/take_N.mp4
     edl.json
     music/{scene}.wav
-    sfx/{scene}/ambient.wav
+    sfx/{scene}/ambient.wav    ← only if AMBIENT_SFX_ENABLED=1
     final.mp4     ← the deliverable
     critique.md   ← prose critique
     metric.json   ← film_loss + per-axis scores  ← THE METRIC
@@ -83,19 +108,27 @@ experiments/
     ...
 ```
 
-`bible.pdf` is the canonical document for a given version. It contains the cover with film_loss summary, look book (style frame, palette, lens/lighting/grade specs, ffmpeg filter chain), cast cards with reference images, locations with moodboards, properly-formatted screenplay, storyboard with B&W panels next to rendered first frames, edit decisions, music inventory, **the full prompt log** (every text prompt the pipeline sent to every model on this run, grouped by model — useful for debugging stylistic drift or copying a prompt to iterate on by hand), and the full critic's report with bar charts. About 10-30 MB depending on shot count.
+`bible.pdf` is the canonical document for a given version. It contains the cover with film_loss summary, look book (style frame, palette, lens/lighting/grade specs, ffmpeg filter chain), cast cards with reference images, locations with moodboards, properly-formatted screenplay, storyboard with B&W panels next to rendered first frames, edit decisions, music inventory, **the full prompt log** (every text prompt the pipeline sent to every model on this run, grouped by model — useful for debugging stylistic drift or copying a prompt to iterate on by hand), and the full critic's report with bar charts. About 10–30 MB depending on shot count.
 
 ## Design choices
 
 - **Single creative file.** The agent only edits `produce.py`. Diffs are reviewable, the search space is bounded, and you can revert by copying back the snapshot from a previous experiment's directory.
 - **Fixed scene budget.** Every experiment renders the same first N scenes of the book. Same wall-clock and cost regardless of what the agent changes (look book, shot list, take count, etc.). This makes `film_loss` fairly comparable across runs.
 - **Resumable artifacts.** Each pipeline stage caches its output in the experiment directory; a crash mid-pipeline is recoverable by re-running `produce.py` (it will skip stages that already wrote their artifact).
-- **Multi-reviewer critic.** A single critic could be biased; we average Gemini 3 Pro (native long-video review) and Claude Opus 4.7 (still-frame review). CLIP character-drift is reported but not folded into `film_loss` because it's already covered implicitly by the human-style critics' continuity score.
+- **Multi-reviewer critic, optional.** A single critic could be biased; we average Gemini 3 Pro (native long-video review) and Claude Opus 4.7 (still-frame review). Gemini is now optional — `evaluate.py` degrades gracefully to Claude-only if `GOOGLE_AI_API_KEY` is unset. CLIP character-drift is reported but not folded into `film_loss` because it's already covered implicitly by the human-style critics' continuity score.
 - **Self-contained scaffolding.** No managed orchestration framework, no DAG library, no message bus. One sequential pipeline, one metric, one editable file.
+- **One billing surface for media.** Everything image/video/SFX runs through Runway credits. The agent doesn't have to reason about quota across four different vendor dashboards.
 
 ## API keys
 
-Five required keys: Anthropic, OpenAI, Google AI, ElevenLabs, Stability. See [`SETUP.md`](SETUP.md) for the per-provider walkthrough — including the two real gotchas (OpenAI org verification for `gpt-image-2`, Google Cloud billing for Veo 3.1).
+Three required, one optional:
+
+1. **`ANTHROPIC_API_KEY`** — Claude Opus 4.7
+2. **`RUNWAYML_API_SECRET`** — image, video, and SFX
+3. **`STABILITY_API_KEY`** — Stable Audio 2.5
+4. **`GOOGLE_AI_API_KEY`** — *optional*, only for the long-video critic
+
+See [`SETUP.md`](SETUP.md) for the per-provider walkthrough.
 
 ## Optional creative direction
 
@@ -111,33 +144,34 @@ Leave them unset for the pipeline's neutral cinematic baseline. The default `LOO
 
 ## Shot routing
 
-Every shot is rendered as a single Veo 3.1 call. Shot duration is capped at 8 seconds — Veo's native single-call limit — and the schema enforces durations of `{4, 6, 8}`. Long beats get covered by multiple shots in the storyboard, not by extending one shot.
+Every shot is rendered as a single Runway video call. Default duration is capped at 8 seconds (Veo's native single-call limit, schema enforces `{4, 6, 8}`). Long beats get covered by multiple shots in the storyboard, not by extending one shot — *unless* the agent chooses `seedance2`, which lifts the cap to 15s.
 
-`route_shot()` in `prepare.py` picks the Veo tier based on `VEO_TIER`:
+`route_shot()` in `prepare.py` picks the model based on `VEO_TIER`:
 
-| `VEO_TIER` | Model | Cost/sec | Use for |
+| `VEO_TIER` | Model | Cost/sec (USD) | Use for |
 |------------|-------|----------|---------|
-| `previs` | Veo 3.1 Lite | ~$0.07 | cheap blocking validation |
-| `fast` (default) | Veo 3.1 Fast | ~$0.15 | iteration |
-| `standard` | Veo 3.1 Standard | ~$0.40 | hero/final delivery |
+| `previs` | `veo3.1_fast` | $0.15 | cheap blocking validation |
+| `fast` (default) | `veo3.1_fast` | $0.15 | iteration |
+| `standard` | `veo3.1` | $0.40 | hero/final delivery |
+| `gen4.5` | `gen4.5` | $0.12 | identity-lock via reference images |
+| `seedance2` | `seedance2` | $0.36 | long beats up to 15s |
 
 Each experiment dir gets a `shot_plan.json` with the per-shot route + aggregate cost surfaced at the top of the bible's storyboard section.
 
 ## Cost per experiment
 
-With defaults (`MAX_SCENES=3`, `TAKES_PER_SHOT=1`, `VEO_TIER=fast`, `720p`):
+With defaults (`MAX_SCENES=3`, `TAKES_PER_SHOT=1`, `VEO_TIER=fast`, `720p`, ambient SFX off, Gemini critic on):
 
 | Item | Cost |
 |------|------|
 | Claude Opus 4.7 | ~$5 |
-| GPT Image 2 | ~$3 |
-| Nano Banana 2 | ~$2 |
-| Veo 3.1 Fast (~96 sec total at $0.15/sec) | ~$15 |
-| Stable Audio + ElevenLabs | ~$2 |
+| Runway: image generation | ~$5 |
+| Runway: Veo Fast (~96 sec @ $0.15/sec) | ~$15 |
+| Stable Audio | ~$1 |
 | Gemini 3 Pro critic | ~$1 |
-| **per experiment** | **~$28** |
+| **per experiment** | **~$27** |
 
-Bumping `TAKES_PER_SHOT=3` and `VEO_TIER=standard` ~3x the cost, ~6x the wall-clock. Don't run more than ~5 experiments per night without a clear reason.
+Bumping `TAKES_PER_SHOT=3` and `VEO_TIER=standard` ~3× the cost, ~6× the wall-clock. Don't run more than ~5 experiments per night without a clear reason.
 
 ## License
 

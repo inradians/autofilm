@@ -806,23 +806,43 @@ def _prompts_section(s: dict, doc: BibleDocTemplate, exp: Experiment) -> list:
         by_model.setdefault(model, []).append((target, entry))
 
     # Friendly display names — keep a stable order: image → video → audio.
+    # Model ids match what `log_prompt(model=...)` records from prepare.py.
+    # When the agent adds new models, append rows here so the bible groups them.
     model_order = [
-        "gpt-image-2",
-        "gemini-3.1-flash-image-preview",
-        "veo-3.1-lite-generate-preview",
-        "veo-3.1-fast-generate-preview",
-        "veo-3.1-generate-preview",
+        "gpt_image_2",
+        "gemini_image3_pro",
+        "gen4_image",
+        "gen4_image_turbo",
+        "gemini_2.5_flash",
+        "veo3.1_fast",
+        "veo3.1",
+        "gen4.5",
+        "gen4_turbo",
+        "gen4_aleph",
+        "seedance2",
         "stable-audio-2.5",
-        "elevenlabs-sfx",
+        "eleven_text_to_sound_v2",
+        "eleven_multilingual_v2",
+        "claude-opus-4-7",
+        "gemini-3-pro",
     ]
     display_name = {
-        "gpt-image-2": "GPT Image 2",
-        "gemini-3.1-flash-image-preview": "Nano Banana 2 (Gemini 3.1 Flash Image)",
-        "veo-3.1-lite-generate-preview": "Veo 3.1 Lite",
-        "veo-3.1-fast-generate-preview": "Veo 3.1 Fast",
-        "veo-3.1-generate-preview": "Veo 3.1 Standard",
-        "stable-audio-2.5": "Stable Audio 2.5",
-        "elevenlabs-sfx": "ElevenLabs SFX",
+        "gpt_image_2":             "GPT Image 2 (via Runway)",
+        "gemini_image3_pro":       "Nano Banana — Gemini Image 3 Pro (via Runway)",
+        "gen4_image":              "Runway Gen-4 Image",
+        "gen4_image_turbo":        "Runway Gen-4 Image Turbo",
+        "gemini_2.5_flash":        "Gemini 2.5 Flash (via Runway)",
+        "veo3.1_fast":             "Veo 3.1 Fast (via Runway)",
+        "veo3.1":                  "Veo 3.1 (via Runway)",
+        "gen4.5":                  "Runway Gen-4.5",
+        "gen4_turbo":              "Runway Gen-4 Turbo",
+        "gen4_aleph":              "Runway Gen-4 Aleph (video-to-video)",
+        "seedance2":               "Seedance 2 (via Runway)",
+        "stable-audio-2.5":        "Stable Audio 2.5",
+        "eleven_text_to_sound_v2": "ElevenLabs SFX (via Runway)",
+        "eleven_multilingual_v2":  "ElevenLabs TTS (via Runway)",
+        "claude-opus-4-7":         "Claude Opus 4.7",
+        "gemini-3-pro":            "Gemini 3 Pro (critic)",
     }
 
     out: list = [_section_heading(s, doc, "7. Prompts")]
