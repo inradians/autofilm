@@ -1,0 +1,29 @@
+[project]
+name = "autofilm"
+version = "0.1.0"
+description = "Autonomous AI agents producing book-to-film adaptations"
+requires-python = ">=3.10"
+dependencies = [
+    # Core orchestration
+    "anthropic>=0.40.0",
+    "openai>=1.50.0",
+    "google-genai>=1.0.0",
+    "elevenlabs>=1.10.0",
+    "httpx>=0.27.0",
+    "tenacity>=9.0.0",
+    "python-dotenv>=1.0.1",
+    # Book parsing
+    "pdfplumber>=0.11.0",
+    # Media assembly
+    "moviepy>=1.0.3",
+    "ffmpeg-python>=0.2.0",
+    "Pillow>=10.4.0",
+    # PDF bible generation
+    "reportlab>=4.2.0",
+    # Quality scoring
+    "torch>=2.4.0",
+    "open-clip-torch>=2.26.0",
+]
+
+[tool.uv]
+managed = true

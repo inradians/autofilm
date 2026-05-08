@@ -1,0 +1,20 @@
+.env
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.uv/
+
+# Experiment artifacts (regeneratable, can be huge)
+experiments/
+
+# OS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+
+# Lock files for now
+uv.lock
