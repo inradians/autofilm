@@ -45,7 +45,7 @@ from reportlab.platypus import (
 )
 from reportlab.platypus.tableofcontents import TableOfContents
 
-from prepare import EXPERIMENTS_DIR, Experiment, LOSS_WEIGHTS
+from prepare import EXPERIMENTS_DIR, Experiment, LOSS_WEIGHTS, iter_all_experiments
 
 
 # ============================================================================
@@ -1202,21 +1202,31 @@ def _main() -> int:
                         help="generate bibles for every experiment with a script.json")
     args = parser.parse_args()
 
+    # Helper: turn an experiment dir into the qualified id we'll pass to
+    # Experiment.load(). For the new per-book layout that's
+    # "{book_slug}/{exp_id}"; for old flat-layout experiments it's just
+    # the dir name.
+    def _qualified_id(p):
+        if p.parent.name == "experiments":
+            return p.name  # old flat layout
+        return f"{p.parent.name}/{p.name}"
+
     if args.all or args.exp_id == "--all":
-        targets = sorted(p.name for p in EXPERIMENTS_DIR.iterdir() if p.is_dir())
+        targets = [_qualified_id(p) for p in iter_all_experiments()]
     elif args.exp_id == "latest" or args.exp_id is None:
-        all_exps = sorted(p.name for p in EXPERIMENTS_DIR.iterdir() if p.is_dir())
+        all_exps = iter_all_experiments()
         if not all_exps:
             print("No experiments found.")
             return 1
-        targets = [all_exps[-1]]
+        targets = [_qualified_id(all_exps[-1])]
     else:
         targets = [args.exp_id]
 
     for exp_id in targets:
         try:
             exp = Experiment.load(exp_id)
-            print(f"  {exp_id}: building bible.pdf...")
+            display_id = f"{exp.book_slug}/{exp.exp_id}"
+            print(f"  {display_id}: building bible.pdf...")
             path = build_bible(exp)
             size_mb = path.stat().st_size / 1_048_576
             print(f"    ✓ {path.name}  ({size_mb:.1f} MB)")

@@ -73,6 +73,7 @@ the SDK sent.
 from __future__ import annotations
 
 import argparse
+import datetime as _dt
 import os
 import sys
 import time
@@ -83,6 +84,22 @@ from pathlib import Path
 _HERE = Path(__file__).resolve().parent
 _ROOT = _HERE.parent
 sys.path.insert(0, str(_ROOT))
+
+
+# ─── Output directory ──────────────────────────────────────────────
+# Each smoke-test run gets its own timestamped subdir under
+# experiments/_smoke_tests/. Outputs persist between runs so you can
+# diff results, compare a generated image against last week's, etc.
+# The leading underscore on _smoke_tests excludes it from the agent's
+# experiment iteration (Experiment.load / iter_all_experiments).
+_RUN_TIMESTAMP = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+_OUTPUT_DIR = _ROOT / "experiments" / "_smoke_tests" / _RUN_TIMESTAMP
+
+
+def _output_path(filename: str) -> Path:
+    """Resolve a filename to a path inside this run's smoke-test dir."""
+    _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    return _OUTPUT_DIR / filename
 
 
 # ─── Test fixtures ──────────────────────────────────────────────────
@@ -114,6 +131,7 @@ class TestResult:
         self.status: str | None = None  # "OK" | "FAIL" | "SKIP"
         self.detail: str = ""
         self.elapsed_sec: float = 0.0
+        self.output_path: Path | None = None  # where the artifact was saved
 
     def ok(self, detail: str = ""):
         self.status = "OK"
@@ -157,7 +175,10 @@ def test_gpt_image(prepare) -> TestResult:
         )
         if not isinstance(out, bytes) or len(out) < 1000:
             raise RuntimeError(f"unexpected output: {len(out) if isinstance(out, bytes) else type(out)} bytes")
-        r.ok(f"received {len(out)//1024}kB png")
+        path = _output_path("gpt_image.png")
+        path.write_bytes(out)
+        r.ok(f"received {len(out)//1024}kB png → {path.name}")
+        r.output_path = path
     except Exception as e:
         r.fail(e, "lines 538-558  (gpt_image → runway_image)")
     r.elapsed_sec = time.time() - t0
@@ -172,7 +193,10 @@ def test_nano_banana(prepare) -> TestResult:
         out = prepare.nano_banana("minimal grey gradient, abstract")
         if not isinstance(out, bytes) or len(out) < 1000:
             raise RuntimeError(f"unexpected output: {len(out) if isinstance(out, bytes) else type(out)} bytes")
-        r.ok(f"received {len(out)//1024}kB png")
+        path = _output_path("nano_banana.png")
+        path.write_bytes(out)
+        r.ok(f"received {len(out)//1024}kB png → {path.name}")
+        r.output_path = path
     except Exception as e:
         r.fail(e, "lines 560-572  (nano_banana → runway_image)")
     r.elapsed_sec = time.time() - t0
@@ -194,7 +218,10 @@ def test_runway_image_with_refs(prepare) -> TestResult:
         )
         if not isinstance(out, bytes) or len(out) < 1000:
             raise RuntimeError(f"unexpected output: {len(out) if isinstance(out, bytes) else type(out)} bytes")
-        r.ok(f"received {len(out)//1024}kB png")
+        path = _output_path("runway_image_refs.png")
+        path.write_bytes(out)
+        r.ok(f"received {len(out)//1024}kB png → {path.name}")
+        r.output_path = path
     except Exception as e:
         r.fail(e, "lines 487-535  (runway_image, refs payload)")
     r.elapsed_sec = time.time() - t0
@@ -209,7 +236,10 @@ def test_elevenlabs_sfx(prepare) -> TestResult:
         out = prepare.elevenlabs_sfx("rain on a window pane", duration_seconds=2)
         if not isinstance(out, bytes) or len(out) < 100:
             raise RuntimeError(f"unexpected output: {len(out) if isinstance(out, bytes) else type(out)} bytes")
-        r.ok(f"received {len(out)//1024}kB audio")
+        path = _output_path("elevenlabs_sfx.wav")
+        path.write_bytes(out)
+        r.ok(f"received {len(out)//1024}kB audio → {path.name}")
+        r.output_path = path
     except Exception as e:
         r.fail(e, "lines 688-703  (elevenlabs_sfx)")
     r.elapsed_sec = time.time() - t0
@@ -225,7 +255,10 @@ def test_runway_tts(prepare) -> TestResult:
         out = prepare.runway_tts("Hello, world.")
         if not isinstance(out, bytes) or len(out) < 100:
             raise RuntimeError(f"unexpected output: {len(out) if isinstance(out, bytes) else type(out)} bytes")
-        r.ok(f"received {len(out)//1024}kB audio")
+        path = _output_path("runway_tts.mp3")
+        path.write_bytes(out)
+        r.ok(f"received {len(out)//1024}kB audio → {path.name}")
+        r.output_path = path
     except Exception as e:
         r.fail(e, "lines 706-722  (runway_tts; presetId nested-dict shape)")
     r.elapsed_sec = time.time() - t0
@@ -247,9 +280,10 @@ def test_veo(prepare) -> TestResult:
         )
         if not isinstance(out, bytes) or len(out) < 10_000:
             raise RuntimeError(f"unexpected output: {len(out) if isinstance(out, bytes) else type(out)} bytes")
-        # Stash the bytes for the aleph test to consume.
-        Path("/tmp/runway_smoke_veo_out.mp4").write_bytes(out)
-        r.ok(f"received {len(out)//1024}kB mp4 → /tmp/runway_smoke_veo_out.mp4")
+        path = _output_path("veo.mp4")
+        path.write_bytes(out)
+        r.ok(f"received {len(out)//1024}kB mp4 → {path.name}")
+        r.output_path = path
     except Exception as e:
         r.fail(e, "lines 573-622  (veo; promptImage + duration + ratio)")
     r.elapsed_sec = time.time() - t0
@@ -261,7 +295,7 @@ def test_aleph(prepare) -> TestResult:
     Reads the veo output from the previous test."""
     r = TestResult("aleph_v2v (4s)")
     t0 = time.time()
-    veo_out = Path("/tmp/runway_smoke_veo_out.mp4")
+    veo_out = _output_path("veo.mp4")
     if not veo_out.exists():
         r.skip("requires veo test to run first (--include-video)")
         r.elapsed_sec = time.time() - t0
@@ -273,7 +307,10 @@ def test_aleph(prepare) -> TestResult:
         )
         if not isinstance(out, bytes) or len(out) < 10_000:
             raise RuntimeError(f"unexpected output: {len(out) if isinstance(out, bytes) else type(out)} bytes")
-        r.ok(f"received {len(out)//1024}kB mp4")
+        path = _output_path("aleph.mp4")
+        path.write_bytes(out)
+        r.ok(f"received {len(out)//1024}kB mp4 → {path.name}")
+        r.output_path = path
     except Exception as e:
         r.fail(e, "lines 624-647  (aleph_video_to_video; videoUri shape)")
     r.elapsed_sec = time.time() - t0
@@ -391,6 +428,22 @@ def main() -> int:
     elif n_fail > 0:
         print("  Some calls failed. The detail line above each FAIL points")
         print("  at the prepare.py block that needs adjustment.")
+
+    # Write a persistent summary markdown in the run directory so users
+    # can diff results between runs, see what files were generated, etc.
+    # This is the "bible for smoke tests" the user asked for.
+    summary_md = _output_path("summary.md")
+    with summary_md.open("w") as f:
+        f.write(f"# Runway smoke test — {_RUN_TIMESTAMP.replace('_', ' ')}\n\n")
+        f.write("| Test | Status | Output | Detail |\n")
+        f.write("|---|---|---|---|\n")
+        for r in results:
+            output_cell = r.output_path.name if r.output_path else "—"
+            detail_cell = r.detail.split("\n")[0] if r.detail else "—"
+            f.write(f"| {r.name} | {r.status} | {output_cell} | {detail_cell} |\n")
+        f.write(f"\n**Total cost:** ~${estimated_cost:.2f}\n")
+        f.write(f"\n**Artifacts:** {_OUTPUT_DIR.relative_to(_ROOT)}\n")
+    print(f"  Summary written: {summary_md.relative_to(_ROOT)}")
     print()
     return 0 if n_fail == 0 else 1
 

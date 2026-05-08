@@ -1,9 +1,10 @@
 """evaluate.py — score a finished experiment's film.
 
 Usage:
-    python evaluate.py exp_001         # score one experiment
-    python evaluate.py latest          # score the most recent experiment
-    python evaluate.py --all           # score every experiment that has a final.mp4 but no metric.json
+    python evaluate.py exp_001                  # score one experiment (searches all books)
+    python evaluate.py jurassic_park/exp_001    # fully-qualified id
+    python evaluate.py latest                   # score the most recent experiment
+    python evaluate.py --all                    # score every experiment that has a final.mp4 but no metric.json
 """
 from __future__ import annotations
 
@@ -11,18 +12,22 @@ import argparse
 import json
 import sys
 
-from prepare import EXPERIMENTS_DIR, Experiment, evaluate_film
+from prepare import Experiment, evaluate_film, iter_all_experiments
 
 
-def _score(exp_id: str) -> dict:
+def _score(exp_id: str) -> tuple[str, dict]:
     exp = Experiment.load(exp_id)
+    # Use the experiment's own id for display (which may now be qualified
+    # like "jurassic_park/exp_001" if the caller passed one) so the output
+    # disambiguates same-numbered experiments across different books.
+    display_id = f"{exp.book_slug}/{exp.exp_id}"
     if not exp.path("final.mp4").exists():
-        print(f"  {exp_id}: no final.mp4, skipping")
-        return {}
+        print(f"  {display_id}: no final.mp4, skipping")
+        return display_id, {}
     if exp.has("metric.json"):
-        print(f"  {exp_id}: metric.json exists; loading")
-        return exp.read_json("metric.json")
-    print(f"  {exp_id}: evaluating film...")
+        print(f"  {display_id}: metric.json exists; loading")
+        return display_id, exp.read_json("metric.json")
+    print(f"  {display_id}: evaluating film...")
     metric = evaluate_film(exp)
     # Refresh the bible now that the critique section can be filled in.
     try:
@@ -32,13 +37,13 @@ def _score(exp_id: str) -> dict:
         print(f"    refreshed bible: {bible_path.name}  ({size_mb:.1f} MB)")
     except Exception as e:  # noqa: BLE001
         print(f"    bible refresh failed (non-fatal): {e}")
-    return metric
+    return display_id, metric
 
 
-def _print_summary(exp_id: str, metric: dict) -> None:
+def _print_summary(display_id: str, metric: dict) -> None:
     if not metric:
         return
-    print(f"\n=== {exp_id} ===")
+    print(f"\n=== {display_id} ===")
     print(f"film_loss = {metric['film_loss']:.4f}")
     for axis, score in metric["scores"].items():
         weight = metric["weights"][axis]
@@ -46,6 +51,19 @@ def _print_summary(exp_id: str, metric: dict) -> None:
     n_changes = len(metric.get("changes", []))
     high = sum(1 for c in metric.get("changes", []) if c.get("priority") == "high")
     print(f"  → {n_changes} suggested changes ({high} high-priority)")
+
+
+def _all_targets() -> list[str]:
+    """Return every experiment as a 'book_slug/exp_id' string for loading."""
+    out = []
+    for p in iter_all_experiments():
+        # Reconstruct the qualified id: parent dir is the book slug,
+        # unless this is an old flat-layout experiment under EXPERIMENTS_DIR.
+        if p.parent.name == "experiments":
+            out.append(p.name)  # old flat layout
+        else:
+            out.append(f"{p.parent.name}/{p.name}")
+    return out
 
 
 def main() -> int:
@@ -56,31 +74,31 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.all or args.exp_id == "--all":
-        targets = sorted(p.name for p in EXPERIMENTS_DIR.iterdir() if p.is_dir())
+        targets = _all_targets()
     elif args.exp_id == "latest" or args.exp_id is None:
-        targets = sorted(p.name for p in EXPERIMENTS_DIR.iterdir() if p.is_dir())
-        if not targets:
+        all_t = _all_targets()
+        if not all_t:
             print("No experiments found.")
             return 1
-        targets = [targets[-1]]
+        targets = [all_t[-1]]
     else:
         targets = [args.exp_id]
 
     results = []
     for t in targets:
         try:
-            metric = _score(t)
+            display_id, metric = _score(t)
             if metric:
-                results.append((t, metric))
-                _print_summary(t, metric)
+                results.append((display_id, metric))
+                _print_summary(display_id, metric)
         except Exception as e:
             print(f"  {t}: evaluation failed: {e}")
 
     if len(results) > 1:
         print("\n=== Leaderboard (lower film_loss is better) ===")
         results.sort(key=lambda r: r[1]["film_loss"])
-        for exp_id, m in results:
-            print(f"  {exp_id}: {m['film_loss']:.4f}")
+        for display_id, m in results:
+            print(f"  {display_id}: {m['film_loss']:.4f}")
     return 0
 
 

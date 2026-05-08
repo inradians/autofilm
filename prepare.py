@@ -330,28 +330,183 @@ def book_chunks(pages_per_chunk: int = 25) -> list[tuple[int, int, str]]:
 # ============================================================================
 # EXPERIMENT STATE
 # ============================================================================
+def _book_slug(book_path: str | Path | None = None) -> str:
+    """Derive a filesystem-safe slug from a book PDF path. Used to group
+    experiments by source book under experiments/{slug}/exp_NNN/.
+
+    Examples:
+        "/uploads/JurassicPark-MichaelCrichton.pdf" -> "jurassic_park"
+        "/uploads/Last Exit to Brooklyn.pdf"        -> "last_exit_to_brooklyn"
+        "/uploads/the_great_gatsby.pdf"             -> "the_great_gatsby"
+        ""                                          -> "unknown_book"
+
+    Author suffixes after the first dash are dropped (a common
+    "Title-Author" filename convention). CamelCase is split into snake.
+    Anything non-alphanumeric collapses to a single underscore.
+    """
+    import re
+    if book_path is None:
+        book_path = os.environ.get("BOOK_PDF_PATH", "")
+    p = Path(book_path)
+    if not p.name:
+        return "unknown_book"
+    stem = p.stem
+    # Drop author suffix when filename uses "Title-Author" convention.
+    if "-" in stem:
+        stem = stem.split("-", 1)[0]
+    # CamelCase / PascalCase → snake: insert _ before any non-leading caps.
+    stem = re.sub(r"(?<!^)(?=[A-Z])", "_", stem)
+    # Collapse anything non-alphanumeric to underscores; lowercase; trim.
+    slug = re.sub(r"[^a-zA-Z0-9]+", "_", stem).strip("_").lower()
+    return slug or "unknown_book"
+
+
+def iter_all_experiments() -> list[Path]:
+    """Return every experiment directory under EXPERIMENTS_DIR, sorted
+    by mtime (oldest first).
+
+    Handles both layouts simultaneously:
+      - new:  experiments/{book_slug}/exp_NNN/
+      - old:  experiments/exp_NNN/         (pre-per-book refactor)
+
+    Skips internal dirs that start with an underscore (e.g.
+    ``experiments/_smoke_tests/``).
+    """
+    out: list[Path] = []
+    if not EXPERIMENTS_DIR.exists():
+        return out
+    for entry in EXPERIMENTS_DIR.iterdir():
+        if not entry.is_dir() or entry.name.startswith("_"):
+            continue
+        if entry.name.startswith("exp_"):
+            # Old flat layout — direct experiment dir.
+            out.append(entry)
+        else:
+            # New per-book layout — entry is a book slug; walk its experiments.
+            for sub in entry.iterdir():
+                if sub.is_dir() and sub.name.startswith("exp_"):
+                    out.append(sub)
+    return sorted(out, key=lambda p: p.stat().st_mtime)
+
+
 @dataclass
 class Experiment:
-    """One experiment = one full pipeline run with a particular produce.py."""
+    """One experiment = one full pipeline run with a particular produce.py.
+
+    Filesystem layout (new):
+        experiments/
+          jurassic_park/
+            exp_001/
+              produce.py        ← snapshot
+              book.txt          ← book slug ("jurassic_park")
+              script.json
+              cast.json
+              ...
+              final.mp4
+              bible.pdf
+            exp_002/
+            ...
+          last_exit_to_brooklyn/
+            exp_001/
+            ...
+          _smoke_tests/         ← Runway smoke test outputs (not real experiments)
+            20260508_214500/
+            ...
+    """
     exp_id: str
     root: Path
 
     @classmethod
-    def new(cls) -> "Experiment":
-        existing = sorted(p for p in EXPERIMENTS_DIR.iterdir() if p.is_dir())
+    def new(cls, book_slug: str | None = None) -> "Experiment":
+        """Create a new experiment dir under experiments/{book_slug}/.
+
+        If ``book_slug`` is None, derives one from the BOOK_PDF_PATH
+        env var. Numbering is per-book — the first Jurassic Park run
+        and the first Last Exit run are both ``exp_001`` under their
+        respective book subdirs.
+        """
+        if book_slug is None:
+            book_slug = _book_slug()
+        book_dir = EXPERIMENTS_DIR / book_slug
+        book_dir.mkdir(parents=True, exist_ok=True)
+        existing = sorted(
+            p for p in book_dir.iterdir()
+            if p.is_dir() and p.name.startswith("exp_")
+        )
         n = len(existing) + 1
         exp_id = f"exp_{n:03d}"
-        root = EXPERIMENTS_DIR / exp_id
+        root = book_dir / exp_id
         root.mkdir()
         # Snapshot produce.py for reproducibility.
         produce_src = PROJECT_ROOT / "produce.py"
         if produce_src.exists():
             (root / "produce.py").write_text(produce_src.read_text())
+        # Stamp the book slug so downstream tools (bible, evaluate) can
+        # surface it without re-deriving from BOOK_PDF_PATH (which may
+        # have changed by the time we look).
+        (root / "book.txt").write_text(book_slug)
         return cls(exp_id=exp_id, root=root)
 
     @classmethod
     def load(cls, exp_id: str) -> "Experiment":
-        return cls(exp_id=exp_id, root=EXPERIMENTS_DIR / exp_id)
+        """Locate an experiment by id.
+
+        Accepts either:
+          - ``"exp_001"`` — searches all book subdirs (and the old flat
+            layout) for the most recent match
+          - ``"jurassic_park/exp_001"`` — direct path under EXPERIMENTS_DIR
+
+        Raises FileNotFoundError if no matching dir exists.
+        """
+        if "/" in exp_id:
+            slug, eid = exp_id.split("/", 1)
+            root = EXPERIMENTS_DIR / slug / eid
+            if not root.is_dir():
+                raise FileNotFoundError(f"No experiment at {root}")
+            return cls(exp_id=eid, root=root)
+        # Bare exp_id — scan all book subdirs (newest match wins).
+        candidates: list[Path] = []
+        for book_dir in EXPERIMENTS_DIR.iterdir() if EXPERIMENTS_DIR.exists() else []:
+            if not book_dir.is_dir() or book_dir.name.startswith("_"):
+                continue
+            cand = book_dir / exp_id
+            if cand.is_dir():
+                candidates.append(cand)
+        # Old flat layout fallback.
+        flat = EXPERIMENTS_DIR / exp_id
+        if flat.is_dir():
+            candidates.append(flat)
+        if not candidates:
+            raise FileNotFoundError(
+                f"No experiment named '{exp_id}' under {EXPERIMENTS_DIR}. "
+                f"Pass a fully-qualified id like 'jurassic_park/{exp_id}' or "
+                f"check that the experiment hasn't been moved."
+            )
+        # If there's more than one (same exp_id in multiple books), pick
+        # the most recent by mtime.
+        winner = max(candidates, key=lambda p: p.stat().st_mtime)
+        return cls(exp_id=exp_id, root=winner)
+
+    @classmethod
+    def latest(cls) -> "Experiment":
+        """Return the most recently modified experiment across all books.
+
+        Used by ``evaluate.py latest`` and the agent loop to find the
+        experiment that just finished.
+        """
+        all_exps = iter_all_experiments()
+        if not all_exps:
+            raise FileNotFoundError(f"No experiments found under {EXPERIMENTS_DIR}")
+        latest = max(all_exps, key=lambda p: p.stat().st_mtime)
+        return cls(exp_id=latest.name, root=latest)
+
+    @property
+    def book_slug(self) -> str:
+        """Read the book slug stamped at experiment creation. Returns
+        'unknown_book' for old flat-layout experiments that pre-date this
+        field."""
+        f = self.root / "book.txt"
+        return f.read_text().strip() if f.exists() else "unknown_book"
 
     # --- Artifact I/O ---
     def write_json(self, name: str, data: Any) -> Path:
