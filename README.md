@@ -32,9 +32,9 @@ MAX_SCENES=1 uv run produce.py
 # Score it (the bible PDF rebuilds with the critique section)
 uv run evaluate.py latest
 
-# Inspect
-open experiments/exp_001/bible.pdf
-cat experiments/exp_001/critique.md
+# Inspect (paths are now per-book: experiments/{book_slug}/exp_NNN/)
+open experiments/jurassic_park/exp_001/bible.pdf
+cat experiments/jurassic_park/exp_001/critique.md
 ```
 
 Once that loop confirms end-to-end, drop `MAX_SCENES=1` for the default 3-scene runs (~$27 each).
@@ -99,25 +99,33 @@ scripts/
   check_setup.py  — verifies keys, ffmpeg, and book PDF before a run
 .claude/skills/   — vendored Runway skills (auto-discovered by Claude Code)
 experiments/
-  exp_001/
-    produce.py    ← snapshot of what produced this run
-    script.json
-    cast.json
-    locations.json
-    lookbook.json
-    storyboard.json
-    shot_plan.json
-    frames/{scene}/{shot}.png
-    clips/{scene}/{shot}/take_N.mp4
-    edl.json
-    music/{scene}.wav
-    sfx/{scene}/ambient.wav    ← only if AMBIENT_SFX_ENABLED=1
-    final.mp4     ← the deliverable
-    critique.md   ← prose critique
-    metric.json   ← film_loss + per-axis scores  ← THE METRIC
-    bible.pdf     ← single-document production reference for this version
-  exp_002/
-    ...
+  jurassic_park/
+    exp_001/
+      produce.py    ← snapshot of what produced this run
+      book.txt      ← book slug ("jurassic_park")
+      script.json
+      cast.json
+      locations.json
+      lookbook.json
+      storyboard.json
+      shot_plan.json
+      frames/{scene}/{shot}.png
+      clips/{scene}/{shot}/take_N.mp4
+      edl.json
+      music/{scene}.wav
+      sfx/{scene}/ambient.wav    ← only if AMBIENT_SFX_ENABLED=1
+      final.mp4     ← the deliverable
+      critique.md   ← prose critique
+      metric.json   ← film_loss + per-axis scores  ← THE METRIC
+      bible.pdf     ← single-document production reference for this version
+    exp_002/
+      ...
+  last_exit_to_brooklyn/
+    exp_001/
+      ...
+  _smoke_tests/     ← Runway SDK validation outputs (scripts/runway_smoke_test.py)
+    20260508_214500/
+      gpt_image.png, veo.mp4, summary.md
 ```
 
 `bible.pdf` is the canonical document for a given version. It contains the cover with film_loss summary, look book (style frame, palette, lens/lighting/grade specs, ffmpeg filter chain), cast cards with reference images, locations with moodboards, properly-formatted screenplay, storyboard with B&W panels next to rendered first frames, edit decisions, music inventory, **the full prompt log** (every text prompt the pipeline sent to every model on this run, grouped by model — useful for debugging stylistic drift or copying a prompt to iterate on by hand), and the full critic's report with bar charts. About 10–30 MB depending on shot count.

@@ -222,7 +222,7 @@ MAX_SCENES=1 TAKES_PER_SHOT=1 VEO_TIER=fast VEO_RESOLUTION=720p \
   uv run produce.py
 ```
 
-That generates one scene (~3-6 shots, ~24-48 sec of video) for **~$5-7** instead of the default ~$22. You'll get back an `experiments/exp_001/` directory with everything: cast, locations, look book, storyboard, references, frames, clips, music, EDL, `final.mp4`, and `bible.pdf`. Open the bible to see the full output — including a "Prompts" section that shows every prompt the pipeline sent to every model on this run, organized by model. Useful for understanding what the agent actually did.
+That generates one scene (~3-6 shots, ~24-48 sec of video) for **~$5-7** instead of the default ~$22. You'll get back an `experiments/{book_name}/exp_001/` directory (where `{book_name}` derives from your `BOOK_PDF_PATH` filename — e.g. "JurassicPark-MichaelCrichton.pdf" → `jurassic_park`) with everything: cast, locations, look book, storyboard, references, frames, clips, music, EDL, `final.mp4`, and `bible.pdf`. Open the bible to see the full output — including a "Prompts" section that shows every prompt the pipeline sent to every model on this run, organized by model. Useful for understanding what the agent actually did.
 
 Once you've confirmed it works end-to-end, raise `MAX_SCENES` to 3 (default) or higher.
 
@@ -305,4 +305,4 @@ autofilm/
         └── rw-generate-audio/
 ```
 
-Once you've made it through this guide once, day-to-day use is just: edit `produce.py`, run `python produce.py`, run `python evaluate.py latest`, open `experiments/exp_NNN/bible.pdf`, repeat.
+Once you've made it through this guide once, day-to-day use is just: edit `produce.py`, run `python produce.py`, run `python evaluate.py latest`, open `experiments/{book_name}/exp_NNN/bible.pdf`, repeat.
