@@ -59,6 +59,7 @@ The headline change: image, video, and SFX generation moved from four separate v
 - **`gen4_aleph`** video-to-video transformation — exposed as `aleph_video_to_video()` in `prepare.py`. Run a per-shot regrade or stylistic transformation on top of any existing clip at 15 credits/sec ($0.15/s).
 - **`gen4_image`** with native reference images — exposed as `runway_image(prompt, reference_images=[...], reference_tags=["jane"], model=GEN4_IMAGE_MODEL)`. Reference images are slot-tagged so prompts can address them as `@jane`. This is Runway's strongest identity-lock primitive and replaces the legacy `gpt_image → nano_banana` chain when continuity is the dominant failure mode.
 - **`runway_tts()`** — narrator/voiceover generation via `eleven_multilingual_v2`. Useful for opening voiceover or letter-reading montages that Veo's in-frame audio can't cover.
+- **Per-shot transitions** with both ffmpeg-xfade (default) and GLSL (opt-in custom shaders) backends. Each shot in the storyboard can carry a `transition_out: {"type": name, "duration": seconds}` field. The 19-name ffmpeg-xfade catalog (cut, fade, fadeblack, dissolve, wipes, slides, iris open/close, hblur, pixelize, …) handles the editorial vocabulary; two bundled GLSL shaders (`chromatic_glitch`, `displacement_push`) and a `register_glsl_transition()` API cover the cases ffmpeg can't express. The compile step auto-detects which path each scene needs.
 
 ### Behavioral changes
 
@@ -82,6 +83,10 @@ Everything `produce.py` imports still exists with the same name and signature, s
 - `openai>=1.50.0` and `elevenlabs>=1.10.0` from `pyproject.toml`. `runwayml>=3.0.0` added.
 - `openai_client()` and `elevenlabs_client()` from `prepare.py`.
 - `check_openai()` and `check_elevenlabs()` from `scripts/check_setup.py`. `check_runway()` added.
+
+### Added (deps)
+
+- `moderngl>=5.12.0` and `numpy>=1.26.0` — only loaded when a GLSL transition actually fires (lazy import inside `transitions._render_glsl_pair`). A user who only uses ffmpeg-xfade transitions never pays the import cost; a user who strips these out gets a clear `RuntimeError` from the GLSL path with installation instructions.
 
 ### Files added
 

@@ -22,6 +22,12 @@ dependencies = [
     # Quality scoring
     "torch>=2.4.0",
     "open-clip-torch>=2.26.0",
+    # GLSL transitions (lazy-imported in transitions.py — only loaded when
+    # the storyboard actually uses a GLSL transition like chromatic_glitch
+    # or displacement_push). Falls back gracefully via ImportError if a
+    # user strips these out.
+    "moderngl>=5.12.0",
+    "numpy>=1.26.0",
 ]
 
 [tool.uv]

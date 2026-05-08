@@ -129,6 +129,8 @@ Editorial vocabulary, in rough frequency order:
 
 The compile step auto-detects whether any scene contains non-cut transitions. If yes, that scene is rendered through ffmpeg's `xfade`/`acrossfade` filter chain (one re-encode pass). If no, the scene takes the fast moviepy concat path. So transitions cost wall-clock only on scenes that use them.
 
+**Custom GLSL transitions** (for the rare beat that ffmpeg can't do): two ship out of the box — `chromatic_glitch` (RGB-split, signal-loss/digital-intrusion beats) and `displacement_push` (luminance-driven dissolution, memory or POV shifts). Use them like any other transition (`{"type": "chromatic_glitch", "duration": 0.8}`). When the storyboard names a GLSL transition the renderer switches to a slower pairwise path (~1s per junction at 720p on a CPU; effectively instant on a GPU). New shaders can be registered from `produce.py` by calling `register_glsl_transition(name, shader, ...)` with a gl-transitions.com style fragment shader — the registration goes into the experiment snapshot so it's reproducible. Keep this rare: GLSL transitions are a creative knob, not a default.
+
 ## Where to make changes
 
 The critic's `changes` list names targets specific to `produce.py`. Common high-leverage knobs:
