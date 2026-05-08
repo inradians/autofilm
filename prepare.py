@@ -715,7 +715,10 @@ def runway_tts(text: str, voice_id: str = "Maya") -> bytes:
     task = runway_client().text_to_speech.create(
         model="eleven_multilingual_v2",
         prompt_text=text,
-        voice={"type": "runway-preset", "preset_id": voice_id},
+        # Note: nested dict keys go through verbatim — the SDK only
+        # auto-converts top-level kwargs from snake_case to camelCase.
+        # The API expects `presetId`, not `preset_id`.
+        voice={"type": "runway-preset", "presetId": voice_id},
     ).wait_for_task_output()
     if not task.output:
         raise RuntimeError("Runway TTS: no output URL returned")

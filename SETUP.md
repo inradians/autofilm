@@ -194,6 +194,25 @@ All systems go. python produce.py to run an experiment.
 
 `SKIP` next to `GOOGLE_AI_API_KEY` is fine — that key is optional and the long-video critic just degrades to Claude-stills-only review. If any line says FAIL, the message tells you exactly which step in section 4 to revisit.
 
+### 7b. Validate the Runway SDK migration (recommended before your first paid run)
+
+The migration from OpenAI/Google AI/ElevenLabs to a Runway-consolidated stack changed the SDK parameter names and request body shapes for every image/video/SFX/TTS call. Static type-checking can't catch errors like `promptImage` vs `prompt_image` or `presetId` vs `preset_id` — those only surface against the live API.
+
+`scripts/runway_smoke_test.py` exercises every Runway SDK call site in `prepare.py` with the cheapest possible inputs and reports OK/FAIL per call.
+
+```bash
+# Quick: image + audio only, ~$0.30, ~30 sec
+RUNWAYML_API_SECRET=key_... python scripts/runway_smoke_test.py
+
+# Full sweep including Veo + Aleph, ~$1.50, 3-5 min
+RUNWAYML_API_SECRET=key_... python scripts/runway_smoke_test.py --include-video
+
+# Just one helper:
+python scripts/runway_smoke_test.py --only veo
+```
+
+When something fails the FAIL line gives the prepare.py line range to inspect plus the full Runway error. Skip this if you're confident the SDK calls are right — but at least once before running an actual `produce.py` experiment, it's a cheap insurance policy against losing $25 to a typo.
+
 ## 8. First run — cost-aware
 
 For your very first experiment, cap everything tight:
