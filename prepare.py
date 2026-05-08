@@ -519,7 +519,7 @@ def runway_image(
         )
 
     if ratio is None:
-        ratio = "1344:768" if model == GEMINI_FLASH_MODEL else _runway_ratio()
+        ratio = _ratio_for_image_model(model)
 
     kwargs: dict[str, Any] = {
         "model": model,
@@ -535,25 +535,103 @@ def runway_image(
     return httpx.get(task.output[0], timeout=120.0).content
 
 
+# Per-model valid pixel ratios for image generation. Each Runway image
+# model exposes a different set; submitting an unsupported value fails
+# validation server-side. Sourced from the BadRequestError responses
+# the API returns for invalid ratios. Update if you add a new model.
+#
+#   gpt_image_2:        1K/2K/4K tiers — no 720p/1080p shapes
+#   gemini_image3_pro:  has its own family (1344:768 for 16:9), accepts
+#                       1024:1024 / 2048:2048 / 4096:4096 for square
+#   gemini_2.5_flash:   same family as gemini_image3_pro
+#   gen4_image (turbo): accepts 720p/1080p ratios; uses _runway_ratio()
+#
+# Per (aspect, model) → pixel ratio. We default to the "1K-class" tier
+# for cost reasons; gpt_image() overrides per quality= argument.
+_IMAGE_MODEL_RATIOS: dict[str, dict[str, str]] = {
+    # gpt_image_2 — using 2K wide as the safe default (exact 16:9 ratio)
+    "gpt_image_2": {
+        "16:9": "2560:1440",
+        "1:1":  "2560:2560",
+        "9:16": "1440:2560",
+    },
+    # gemini_image3_pro (Nano Banana) — 1K-class
+    "gemini_image3_pro": {
+        "16:9": "1344:768",
+        "1:1":  "1024:1024",
+        "9:16": "768:1344",
+    },
+    # gemini_2.5_flash (Nano Banana, fastest) — same family
+    "gemini_2.5_flash": {
+        "16:9": "1344:768",
+        "1:1":  "1024:1024",
+        "9:16": "768:1344",
+    },
+}
+
+
+def _ratio_for_image_model(model: str) -> str:
+    """Pick a valid pixel ratio for an image-generation model.
+
+    Looks up the model in the per-model ratio table; falls back to the
+    generic _runway_ratio() (which returns 1280:720 etc.) for models
+    that aren't constrained to special shapes (gen4_image*).
+    """
+    if model in _IMAGE_MODEL_RATIOS:
+        return _IMAGE_MODEL_RATIOS[model].get(ASPECT_RATIO, _runway_ratio())
+    return _runway_ratio()
+
+
+def _aspect_from_size(size: str) -> str:
+    """Parse old OpenAI-style size strings ('1792x1024', '1024x1024') into
+    one of '16:9' / '1:1' / '9:16'. Used by gpt_image() for backward
+    compatibility with produce.py callers."""
+    try:
+        w, h = (int(x) for x in size.lower().split("x"))
+    except Exception:
+        return "16:9"
+    if w > h * 1.3:
+        return "16:9"
+    if h > w * 1.3:
+        return "9:16"
+    return "1:1"
+
+
 def gpt_image(prompt: str, size: str = "1792x1024", quality: str = "high") -> bytes:
     """GPT Image 2 — best instruction-following image gen, via Runway.
 
-    Backwards-compatible signature for produce.py. The `size` and `quality`
-    args are accepted for compatibility but mapped onto Runway's pixel-ratio
-    system (1K / 2K / 4K) since Runway exposes `gpt_image_2` with a fixed
-    quality=high default and resolution-based pricing.
+    Backwards-compatible signature for produce.py. The OpenAI ``size``
+    string is mapped to one of '16:9' / '1:1' / '9:16'; the ``quality``
+    argument selects the gpt_image_2 tier (1K → ~$0.01, 2K → ~$0.10,
+    4K → ~$0.40 per image).
     """
-    # Map old OpenAI size strings onto Runway pixel ratios. The original
-    # autofilm only ever called with "1792x1024" (16:9 ~2K). Map to 1080p.
-    if size in ("1792x1024", "1920x1080", "1664x912"):
-        ratio = "1920:1080"
-    elif size in ("1024x1792", "1080x1920"):
-        ratio = "1080:1920"
-    elif size in ("1024x1024",):
-        ratio = "1024:1024"
-    else:
-        ratio = _runway_ratio()
-    _ = quality  # unused — Runway's gpt_image_2 always uses quality=high
+    aspect = _aspect_from_size(size)
+    # gpt_image_2's tier-specific ratios. These are the "exact" 16:9 / 1:1 /
+    # 9:16 options at each tier — see the API's BadRequestError response
+    # for the full list.
+    tier_ratios: dict[str, dict[str, str]] = {
+        "low": {       # 1K tier
+            "16:9": "1920:1088",
+            "1:1":  "1920:1920",
+            "9:16": "1088:1920",
+        },
+        "standard": {  # 2K tier
+            "16:9": "2560:1440",
+            "1:1":  "2560:2560",
+            "9:16": "1440:2560",
+        },
+        "high": {      # 4K tier
+            "16:9": "3840:2160",
+            "1:1":  "2880:2880",
+            "9:16": "2160:3840",
+        },
+        "auto": {      # let Runway pick
+            "16:9": "auto",
+            "1:1":  "auto",
+            "9:16": "auto",
+        },
+    }
+    ratio = tier_ratios.get(quality, tier_ratios["high"]).get(aspect, "auto")
     return runway_image(prompt, model=GPT_IMAGE_MODEL, ratio=ratio)
 
 
@@ -688,19 +766,60 @@ def stable_audio(prompt: str, duration_seconds: int = 30) -> bytes:
 def elevenlabs_sfx(prompt: str, duration_seconds: int = 10) -> bytes:
     """ElevenLabs sound effects via Runway's /v1/sound_effect endpoint.
 
-    Runway proxies the eleven_text_to_sound_v2 model and bills 1 credit
-    per provided second (or 2 credits with no duration). Output is MP3;
-    we transcode to WAV at the call site if needed.
+    The Runway SDK's ``sound_effect.create()`` does NOT accept any
+    duration parameter — the model picks the length from the prompt
+    (typically 0.5-22 seconds). To honor the caller's requested
+    ``duration_seconds``, we trim or loop the returned audio with
+    ffmpeg after the fact. This keeps the function's contract intact
+    for produce.py callers that pass a specific scene length.
     """
     duration = max(1, min(int(duration_seconds), 22))
     task = runway_client().sound_effect.create(
         model=RUNWAY_SFX_MODEL,
         prompt_text=prompt,
-        duration_seconds=duration,
     ).wait_for_task_output()
     if not task.output:
         raise RuntimeError("Runway SFX: no output URL returned")
-    return httpx.get(task.output[0], timeout=120.0).content
+    raw = httpx.get(task.output[0], timeout=120.0).content
+    return _fit_audio_to_duration(raw, duration)
+
+
+def _fit_audio_to_duration(audio_bytes: bytes, target_seconds: float) -> bytes:
+    """Trim audio if longer than ``target_seconds``, loop if shorter.
+
+    Returns 16-bit-PCM 44.1kHz WAV bytes for predictable downstream
+    handling by the audio mix stage. If the source decoder happens to
+    fail (rare; would require malformed input from Runway), the
+    original bytes are returned unchanged so the caller can decide
+    what to do.
+    """
+    if target_seconds <= 0:
+        return audio_bytes
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix="autofilm_sfx_") as tmp:
+        tmpdir = Path(tmp)
+        in_path = tmpdir / "in.bin"
+        out_path = tmpdir / "out.wav"
+        in_path.write_bytes(audio_bytes)
+        try:
+            # -stream_loop -1 makes input loop indefinitely; -t caps the
+            # output at target_seconds. This handles both cases (input
+            # longer than target → trim; input shorter → loop) in one
+            # invocation.
+            subprocess.run(
+                [
+                    "ffmpeg", "-y", "-loglevel", "error",
+                    "-stream_loop", "-1",
+                    "-i", str(in_path),
+                    "-t", f"{target_seconds:.2f}",
+                    "-c:a", "pcm_s16le", "-ar", "44100",
+                    str(out_path),
+                ],
+                check=True,
+            )
+            return out_path.read_bytes()
+        except subprocess.CalledProcessError:
+            return audio_bytes
 
 
 @api_retry

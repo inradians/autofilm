@@ -312,6 +312,17 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    # Load .env so RUNWAYML_API_SECRET resolves whether it's exported in
+    # the shell or stored in the project's .env file. Without this the
+    # env-check below fires before prepare.py's module-level load_dotenv
+    # runs, and users get the misleading "not set" error even when the
+    # key is sitting in .env.
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass  # python-dotenv missing; user must export the var manually
+
     # Pick which tests run.
     if args.only:
         chosen = list(args.only)
