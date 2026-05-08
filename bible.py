@@ -717,6 +717,16 @@ def _storyboard_section(s: dict, doc: BibleDocTemplate, exp: Experiment) -> list
                     + (f" — {_escape(decision.get('rationale', ''))}"
                        if decision.get('rationale') else ""),
                     s["small"]))
+            # Planned transition out of this shot. Show only when not a
+            # default cut, since cut-after-every-shot is unremarkable.
+            transition = (decision or {}).get("transition_out") or shot.get("transition_out")
+            if transition and transition.get("type") and transition["type"] != "cut":
+                dur = transition.get("duration")
+                dur_s = f", {dur:.2f}s" if isinstance(dur, (int, float)) else ""
+                details.append(Paragraph(
+                    f"<b>Transition out.</b> <font name='Courier' size='8'>"
+                    f"{_escape(transition['type'])}</font>{dur_s}",
+                    s["small"]))
 
             spec_row = Table([[spec_table, details]],
                              colWidths=[2.0 * inch, 4.4 * inch])

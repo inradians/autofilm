@@ -51,6 +51,15 @@ from prepare import (
     veo,
     veo_final_model,
 )
+from transitions import (
+    DEFAULT_DURATION as TRANSITION_DEFAULT_DURATION,
+    any_non_cut,
+    prompt_guidance as transitions_prompt_guidance,
+    render_clips_with_transitions,
+    transition_names,
+    transitions_for_scene,
+    validate_transition,
+)
 
 
 # ============================================================================
@@ -673,6 +682,10 @@ beat, a slow camera move that needs time to breathe. Modern cinema
 averages ~3-5 second shots; don't default to 8s for everything.
 
 Mix sizes and angles for visual variety. Motivate every camera move.
+
+TRANSITIONS — `transition_out` field on each shot:
+""" + transitions_prompt_guidance() + """
+
 Return only via the tool."""
 
 SHOTLIST_TOOL_SCHEMA = {
@@ -699,6 +712,27 @@ SHOTLIST_TOOL_SCHEMA = {
                             "description": "Must be 4, 6, or 8 seconds (Veo 3.1 cap).",
                         },
                         "composition_notes": {"type": "string"},
+                        "transition_out": {
+                            "type": "object",
+                            "description": (
+                                "How to transition from this shot to the NEXT shot. "
+                                "Default cut. The transition on the LAST shot of "
+                                "the LAST scene is ignored."
+                            ),
+                            "properties": {
+                                "type": {
+                                    "type": "string",
+                                    "enum": transition_names(),
+                                },
+                                "duration": {
+                                    "type": "number",
+                                    "minimum": 0.0,
+                                    "maximum": 2.0,
+                                    "description": "Seconds; ignored when type is cut.",
+                                },
+                            },
+                            "required": ["type"],
+                        },
                     },
                     "required": ["shot_id", "shot_size", "angle", "camera_move",
                                  "subject", "action", "duration_seconds", "composition_notes"],
@@ -1013,6 +1047,14 @@ def build_video(exp: Experiment, script: dict, cast: list[dict],
 EDIT_SYSTEM = """You are a film editor making the first cut. Per shot,
 pick the strongest take and (optionally) trim points. Priorities:
 performance, framing, continuity, technical quality. Keep cuts tight.
+
+You can also OVERRIDE the storyboard's transition for any shot by
+emitting a transition_out field. Most of the time the planned
+transition is correct; override only when the chosen take genuinely
+calls for something different (e.g. the take's tail is dead air, so a
+fade through black would feel forced — switch to a hard cut). Leaving
+transition_out unset preserves whatever the storyboard specified.
+
 Return only via the tool."""
 
 EDIT_TOOL_SCHEMA = {
@@ -1031,6 +1073,25 @@ EDIT_TOOL_SCHEMA = {
                         "in_seconds": {"type": "number"},
                         "out_seconds": {"type": "number"},
                         "rationale": {"type": "string"},
+                        "transition_out": {
+                            "type": "object",
+                            "description": (
+                                "Optional: override the storyboard's transition "
+                                "for this shot. Omit to inherit from the storyboard."
+                            ),
+                            "properties": {
+                                "type": {
+                                    "type": "string",
+                                    "enum": transition_names(),
+                                },
+                                "duration": {
+                                    "type": "number",
+                                    "minimum": 0.0,
+                                    "maximum": 2.0,
+                                },
+                            },
+                            "required": ["type"],
+                        },
                     },
                     "required": ["scene_id", "shot_id", "chosen_take"],
                 },
@@ -1039,6 +1100,29 @@ EDIT_TOOL_SCHEMA = {
         "required": ["decisions"],
     },
 }
+
+
+def _storyboard_transition_for(storyboard: dict, scene_id: str, shot_id: str) -> dict | None:
+    """Look up a shot's planned transition_out from the storyboard. None if
+    the shot wasn't found or had no transition specified."""
+    for shot in storyboard.get(scene_id, []):
+        if shot["shot_id"] == shot_id:
+            return shot.get("transition_out")
+    return None
+
+
+def _merge_transition_into_decisions(decisions: list[dict], storyboard: dict) -> list[dict]:
+    """For each EDL decision, fill in transition_out from the storyboard
+    if the editor didn't already override it. Validates the result so
+    downstream code never has to re-validate."""
+    for d in decisions:
+        if "transition_out" not in d or not d["transition_out"]:
+            planned = _storyboard_transition_for(storyboard, d["scene_id"], d["shot_id"])
+            if planned:
+                d["transition_out"] = planned
+        # Normalize whatever ended up in the slot.
+        d["transition_out"] = validate_transition(d.get("transition_out"))
+    return decisions
 
 
 def build_edl(exp: Experiment, storyboard: dict, clips_manifest: dict) -> dict:
@@ -1055,6 +1139,7 @@ def build_edl(exp: Experiment, storyboard: dict, clips_manifest: dict) -> dict:
             for sid, shots in clips_manifest.items()
             for shid in shots.keys()
         ]
+        decisions = _merge_transition_into_decisions(decisions, storyboard)
         edl = {"decisions": decisions}
         exp.write_json("edl.json", edl)
         return edl
@@ -1108,6 +1193,7 @@ def build_edl(exp: Experiment, storyboard: dict, clips_manifest: dict) -> dict:
                         "chosen_take": 1, "rationale": f"Fallback ({e})",
                     })
 
+    all_decisions = _merge_transition_into_decisions(all_decisions, storyboard)
     edl = {"decisions": all_decisions}
     exp.write_json("edl.json", edl)
     return edl
@@ -1116,6 +1202,37 @@ def build_edl(exp: Experiment, storyboard: dict, clips_manifest: dict) -> dict:
 # ============================================================================
 # STAGE 10 — Final compile, color grade, sound mix
 # ============================================================================
+
+def _trim_clip(src: Path, dst: Path, in_s: float, out_s: float | None) -> Path:
+    """Write a re-encoded copy of `src` trimmed to [in_s, out_s]. Re-encode
+    rather than stream-copy because xfade/concat downstream require
+    consistent SAR/PTS that stream-copy may not produce on Veo outputs.
+
+    Skips work if `dst` already exists and is non-empty (resumability).
+    """
+    if dst.exists() and dst.stat().st_size > 0:
+        return dst
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    args: list[str] = ["-i", str(src)]
+    if in_s and in_s > 0:
+        args = ["-ss", str(in_s)] + args
+    if out_s and out_s > (in_s or 0):
+        args += ["-t", str(out_s - (in_s or 0))]
+    args += [
+        "-c:v", "libx264", "-preset", "medium", "-b:v", "8000k",
+        "-pix_fmt", "yuv420p", "-r", "24",
+        "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
+        str(dst),
+    ]
+    ffmpeg(args)
+    return dst
+
+
+def _resolution_dims() -> tuple[int, int]:
+    """(width, height) for compile output, derived from VEO_RESOLUTION."""
+    res = os.getenv("VEO_RESOLUTION", "720p").lower()
+    return (1920, 1080) if res == "1080p" else (1280, 720)
+
 
 def compile_final(exp: Experiment, script: dict, storyboard: dict,
                    clips_manifest: dict, edl: dict, lookbook: dict) -> Path:
@@ -1128,11 +1245,18 @@ def compile_final(exp: Experiment, script: dict, storyboard: dict,
     scene_order = [s["id"] for s in script["scenes"]]
     scene_by_id = {s["id"]: s for s in script["scenes"]}
 
+    width, height = _resolution_dims()
+
     scene_clips = []
     for scene_id in scene_order:
         scene = scene_by_id[scene_id]
         shots = storyboard.get(scene_id, [])
-        shot_clips = []
+
+        # Walk shots in storyboard order, gathering (decision, take_path)
+        # pairs. We need decisions in storyboard order so transitions
+        # line up with the right pair of clips.
+        ordered_decisions: list[dict] = []
+        ordered_paths: list[Path] = []
         for shot in shots:
             decision = decision_by_shot.get((scene_id, shot["shot_id"]))
             if not decision:
@@ -1146,18 +1270,52 @@ def compile_final(exp: Experiment, script: dict, storyboard: dict,
             cp = Path(takes[take_idx])
             if not cp.exists():
                 continue
-            c = VideoFileClip(str(cp))
-            in_s = decision.get("in_seconds") or 0.0
-            out_s = decision.get("out_seconds")
-            if out_s and out_s > in_s:
-                c = c.subclip(in_s, min(out_s, c.duration))
-            elif in_s > 0:
-                c = c.subclip(in_s)
-            shot_clips.append(c)
-        if not shot_clips:
+            ordered_decisions.append(decision)
+            ordered_paths.append(cp)
+
+        if not ordered_paths:
             continue
 
-        scene_video = concatenate_videoclips(shot_clips, method="compose")
+        # Two assembly paths:
+        #
+        # 1. All hard cuts → use moviepy's existing concatenate (fast,
+        #    no re-encode of clips that don't need trimming).
+        # 2. At least one non-cut transition → pre-trim each clip to a
+        #    temp file, then render the scene through ffmpeg xfade.
+        scene_transitions = transitions_for_scene(ordered_decisions)
+        scene_video = None  # moviepy clip, set by one of the branches below
+
+        if any_non_cut(scene_transitions):
+            print(f"  {scene_id}: assembling with transitions "
+                  f"{[t['type'] for t in scene_transitions]}")
+            trimmed_paths: list[Path] = []
+            for d, src in zip(ordered_decisions, ordered_paths):
+                in_s = d.get("in_seconds") or 0.0
+                out_s = d.get("out_seconds")
+                trimmed_dst = exp.path(
+                    f"_trimmed/{scene_id}/{d['shot_id']}_take{d['chosen_take']}.mp4"
+                )
+                trimmed_paths.append(_trim_clip(src, trimmed_dst, in_s, out_s))
+            assembled = exp.path(f"_assembled/{scene_id}.mp4")
+            render_clips_with_transitions(
+                trimmed_paths, scene_transitions, assembled,
+                fps=24, width=width, height=height,
+            )
+            scene_video = VideoFileClip(str(assembled))
+        else:
+            shot_clips = []
+            for d, src in zip(ordered_decisions, ordered_paths):
+                c = VideoFileClip(str(src))
+                in_s = d.get("in_seconds") or 0.0
+                out_s = d.get("out_seconds")
+                if out_s and out_s > in_s:
+                    c = c.subclip(in_s, min(out_s, c.duration))
+                elif in_s > 0:
+                    c = c.subclip(in_s)
+                shot_clips.append(c)
+            if not shot_clips:
+                continue
+            scene_video = concatenate_videoclips(shot_clips, method="compose")
 
         # Ambient bed. Optional — controlled by AMBIENT_SFX_ENABLED. When
         # off (the default), Veo's native audio + the music cue cover the

@@ -39,6 +39,18 @@ cat experiments/exp_001/critique.md
 
 Once that loop confirms end-to-end, drop `MAX_SCENES=1` for the default 3-scene runs (~$27 each).
 
+## Test books
+
+The pipeline targets a single source PDF at a time, set via `BOOK_PDF_PATH` in `.env`. Three deliberately-different books in the test set, each chosen to stress a different axis of the pipeline:
+
+| Book | Author, year | Why it's in the set | Wikipedia |
+|---|---|---|---|
+| **Jurassic Park** *(default)* | Michael Crichton, 1991 | Dialogue-heavy thriller with discrete locations, a manageable cast, and clean narrative beats — the easy mode of the three. Stresses **continuity** (re-use of locations and characters across scenes) and **fidelity** (the book's set-pieces are well-known, so deviations are obvious). | [link](https://en.wikipedia.org/wiki/Jurassic_Park) |
+| **Last Exit to Brooklyn** | Hubert Selby Jr., 1964 | Episodic, transgressive, low-incident, written without conventional punctuation. Stresses **acting** (much of the book is interior monologue rendered as fragmented dialogue) and **cinematography** (locations are bleak and similar — the look book has to do real work). |  [link](https://en.wikipedia.org/wiki/Last_Exit_to_Brooklyn) |
+| **The Electric Kool-Aid Acid Test** | Tom Wolfe, 1968 | New Journalism, non-linear, drug-addled, second-person digressions. Stresses **fidelity** (Wolfe's voice is the book — losing it loses everything) and **sound** (the music cue and ambient layer carry a lot of the period feel). | [link](https://en.wikipedia.org/wiki/The_Electric_Kool-Aid_Acid_Test) |
+
+**We will use Jurassic Park first.** It's already the default `BOOK_PDF_PATH`. Drop the PDF at `/mnt/user-data/uploads/JurassicPark-MichaelCrichton.pdf` (or override the env var) and you're ready to run. The other two are for the second and third experiment runs once the pipeline is dialed in.
+
 ## Running the agent
 
 Open Claude Code, Codex, Cursor, or your agent of choice in this repo (and disable confirmation prompts if you want it to run overnight), then prompt:

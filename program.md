@@ -101,6 +101,34 @@ Don't chain Aleph reflexively — it doubles the cost of the affected shot and a
 - `elevenlabs_sfx(prompt, duration_seconds)` — ambient bed; off by default, enable with `AMBIENT_SFX_ENABLED=1`.
 - `runway_tts(text, voice_id)` — **NEW** narrator/voiceover. Veo's native audio only covers in-frame dialogue. If you want an opening voiceover or letter-reading montage, this is the tool.
 
+### Transitions (new in v0.2)
+
+Each shot in the storyboard can carry a `transition_out` field that defines how it bridges to the next shot. Default is `cut` (hard cut). The catalog lives in `transitions.py` and is auto-injected into the SHOTLIST_SYSTEM prompt, so Claude has the full menu when planning.
+
+Editorial vocabulary, in rough frequency order:
+
+| Use it for | Transition |
+|---|---|
+| 95% of shot-to-shot bridges | `cut` |
+| End of a chapter / major time jump / death | `fadeblack` (0.7-1.5s) |
+| Flashback entry / dream sequence / revelation | `fadewhite` (0.5-1.0s) |
+| Continuity within a montage | `fade` or `dissolve` (0.3-0.6s) |
+| Memory beat | `fadegrays` (0.6-1.0s) |
+| "Meanwhile" geographic move | `wiperight` or `slideleft` (0.4-0.7s) |
+| Sequence button / iris close | `circleclose` (0.5-1.0s) |
+| Drug/sleep/glitch | `hblur` or `pixelize` (0.3-0.6s) |
+
+**When the critic flags pacing or structure**, transitions are often the right knob:
+
+- "Scene transitions feel abrupt" → add `fadeblack` (0.7s) on the last shot of each scene.
+- "Montage doesn't read as a montage" → switch internal cuts to `fade` (0.3s) for connective tissue.
+- "Time jump unclear in scene N" → put a `fadeblack` or `fadegrays` at the moment the leap happens.
+- "This sequence drags" → don't add transitions, *remove* them. Hard cuts are tighter than dissolves.
+
+**Anti-pattern**: a film with a transition on every shot reads as amateurish. Reserve them for scene endings and the rare beat that genuinely needs one. The default of `cut` is correct for ~95% of shots.
+
+The compile step auto-detects whether any scene contains non-cut transitions. If yes, that scene is rendered through ffmpeg's `xfade`/`acrossfade` filter chain (one re-encode pass). If no, the scene takes the fast moviepy concat path. So transitions cost wall-clock only on scenes that use them.
+
 ## Where to make changes
 
 The critic's `changes` list names targets specific to `produce.py`. Common high-leverage knobs:
@@ -154,6 +182,9 @@ The bible PDF is your debugging tool — flip through it and you'll see the look
 - "Acting flat in close-ups" → expand `TAKE_VARIATIONS` with stronger emotional modifiers, bump `TAKES_PER_SHOT` env var.
 - "Lighting wrong on shot M" (single shot) → wrap that shot in `aleph_video_to_video()` as a regrade pass before EDL assembly.
 - "This shot needs to breathe" (single oner) → escalate that one shot's tier to `seedance2` for a 12-15s single take.
+- "Scene boundaries feel abrupt" / "no breath between scenes" → set `transition_out: {type: "fadeblack", duration: 0.7}` on the last shot of each scene in the storyboard.
+- "Time jump in scene N is confusing" → put `fadeblack` or `fadegrays` on the shot right before the jump.
+- "Montage doesn't read as a montage" → set `transition_out: {type: "fade", duration: 0.3}` on every internal montage shot.
 
 ## When to stop
 

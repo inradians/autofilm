@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.3.0 — Shot-level transitions (May 2026)
+
+The storyboard now plans transitions between shots, and `compile_final` honors them via ffmpeg's `xfade` / `acrossfade` filter chain.
+
+### What's new
+
+- **`transitions.py`** — new module at the project root. Ships a curated catalog of 19 named transitions (`cut`, `fade`, `fadeblack`, `fadewhite`, `dissolve`, `fadegrays`, `wipe{left,right,up,down}`, `slide{left,right}`, `smooth{left,right}`, `circleopen`, `circleclose`, `radial`, `pixelize`, `hblur`) with editorial descriptions, plus a validator and an ffmpeg-backed renderer.
+- **Storyboard schema** — each shot now accepts an optional `transition_out: {type, duration}`. Default is `cut`. The catalog and editorial guidance are auto-injected into the SHOTLIST_SYSTEM prompt, so Claude has the full menu when planning shot lists.
+- **EDL schema** — same field, lets the editor override what the storyboard planned. Storyboard transition is preserved into the EDL by default.
+- **Compile path** — when a scene contains any non-cut transition, that scene is rendered through ffmpeg `xfade`/`acrossfade` (one re-encode pass with consistent SAR/PTS). When all transitions are cuts, the existing fast moviepy `concatenate_videoclips` path runs unchanged. Auto-detected per-scene.
+- **Bible** — the storyboard section surfaces planned non-cut transitions next to the EDL line for each shot.
+- **`program.md`** — new "Transitions" subsection in the model menu, four new entries in the critic-output patterns list.
+
+### Why ffmpeg, not GLSL
+
+`xfade` / `acrossfade` ship ~50 named transitions covering every editorial vocabulary item we'd want — fades, wipes, slides, irises, dissolves, blurs, glitch — and run headless without GPU. A Python+GLSL path (e.g. moderngl driving fragment shaders) would add a heavy dep tree and only matters for transitions xfade can't express. If the agent ever needs something genuinely custom (kaleidoscope push, glitch shatter), the cleaner escape hatch is to render the transition itself as a separate Veo or Aleph shot inserted between the two adjacent shots, with `cut` on either side.
+
+### Behavioral
+
+- Transitions are clamped to never overlap more than 40% of either neighboring clip; if that floor is below 0.10s the transition silently degrades to `cut`. So a 4s shot can have at most a 1.6s transition out — well above the editorial range of 0.3-1.0s — but a chained pair of 1s shots can't take a 0.8s fade.
+- Default `cut` is preserved on every shot if the storyboard or EDL doesn't specify otherwise. No existing behavior changes for scenes whose shots have no `transition_out` field.
+- The existing 0.5s scene-to-scene `crossfadein` is unchanged. Shot-level transitions are intra-scene; scene-level bridging is still handled by moviepy.
+
+### Files added
+
+- `transitions.py` — the module described above.
+
+### Files changed
+
+- `produce.py` — schema/prompt updates, EDL forwarding, refactored `compile_final` per-scene assembly with a transitions branch, plus new `_trim_clip` helper that re-encodes shot trims for downstream filter-graph compatibility.
+- `bible.py` — render `transition_out` in storyboard cards.
+- `program.md` — transitions subsection + 3 new critic-pattern entries.
+- `README.md` — added the test-books table.
+
+---
+
 ## 0.2.0 — Runway-consolidated stack (May 2026)
 
 The headline change: image, video, and SFX generation moved from four separate vendor APIs onto one Runway integration. Setup goes from 5 keys to 3, and the two annoying approval delays (OpenAI org verification, Google Cloud billing for Veo) are gone.
