@@ -140,10 +140,11 @@ MUSIC_STYLE = (
 
 # How many image/video/audio generation tasks to run in parallel.
 # Each task holds a live Runway API call polling for completion, so the
-# effective limit is whatever Runway allows concurrently on your account
-# (typically 10-20 tasks). Set to 1 to disable parallelism entirely
-# (useful for debugging; every print statement appears in order).
-MAX_WORKERS: int = int(os.getenv("MAX_WORKERS", "2"))
+# effective limit is whatever Runway allows concurrently on your account.
+# Runway's default tier permits only ONE in-flight task per account, so
+# this defaults to 1 — set MAX_WORKERS=N in the env if your account is
+# on a higher tier or you're routing video/image to non-Runway backends.
+MAX_WORKERS: int = int(os.getenv("MAX_WORKERS", "1"))
 
 # Generation backend selector. Set in .env or shell to switch away from
 # the default without changing any other code.
