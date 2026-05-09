@@ -108,6 +108,11 @@ GEMINI_FLASH_MODEL = "gemini_2.5_flash"     # 5 credits, any resolution
 GOOGLE_VEO_MODEL   = os.getenv("GOOGLE_VIDEO_MODEL", "veo-3.1-generate-preview")
 GOOGLE_IMAGE_MODEL = "imagen-3.0-generate-002"
 
+# Reve API — api.reve.com
+# State-of-the-art image generation with create, remix (multi-ref), and edit.
+# Remix accepts up to 6 reference images — excellent for character consistency.
+REVE_API_BASE = "https://api.reve.com"
+
 # LTX 2.3 — Lightricks API (api.ltx.video)
 # ltx-2-3-pro  → best quality, all endpoints, ~$0.05-0.12/s @ 720p
 # ltx-2-3-fast → rapid iteration, text-to-video + image-to-video only
@@ -165,6 +170,71 @@ def google_imagen(prompt: str, aspect_ratio: str = "16:9") -> bytes:
     if not resp.generated_images:
         raise RuntimeError("Google Imagen 3: no images returned")
     return resp.generated_images[0].image.image_bytes
+
+
+def reve_image(
+    prompt: str,
+    reference_images: list[bytes] | None = None,
+    aspect_ratio: str = "16:9",
+    version: str = "latest",
+) -> bytes:
+    """Generate an image via the Reve API (api.reve.com).
+
+    Routes to the best endpoint based on inputs:
+      - reference_images provided → POST /v1/image/remix
+        Accepts up to 6 base64 reference images. Excellent for character
+        and moodboard consistency — the model attends to all refs.
+      - no references → POST /v1/image/create
+        Pure text-to-image with automatic prompt enhancement.
+
+    Both endpoints are synchronous and return PNG bytes directly when
+    Accept: image/png is set — no polling required.
+
+    Supported aspect ratios: '16:9', '9:16', '3:2', '2:3', '4:3', '3:4', '1:1'.
+    Requires REVE_API_KEY from api.reve.com/console.
+    """
+    import base64 as _b64
+    api_key = _require_key("REVE_API_KEY")
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Accept":        "image/png",   # direct bytes, no base64 decode needed
+        "Content-Type":  "application/json",
+    }
+
+    if reference_images:
+        # Remix: text + up to 6 reference images → new image
+        refs_b64 = [_b64.b64encode(r).decode() for r in reference_images[:6]]
+        body: dict = {
+            "prompt":           prompt[:2560],
+            "reference_images": refs_b64,
+            "aspect_ratio":     aspect_ratio,
+            "version":          version,
+        }
+        endpoint = "/v1/image/remix"
+    else:
+        # Create: text → image
+        body = {
+            "prompt":       prompt[:2560],
+            "aspect_ratio": aspect_ratio,
+            "version":      version,
+        }
+        endpoint = "/v1/image/create"
+
+    resp = httpx.post(
+        f"{REVE_API_BASE}{endpoint}",
+        headers=headers,
+        json=body,
+        timeout=120.0,
+    )
+    if not resp.is_success:
+        try:
+            detail = resp.json()
+        except Exception:
+            detail = resp.text[:400]
+        raise RuntimeError(f"Reve {endpoint} {resp.status_code}: {detail}")
+
+    # With Accept: image/png the response body is raw PNG bytes
+    return resp.content
 
 
 def google_veo(

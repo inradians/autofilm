@@ -62,6 +62,8 @@ from prepare import (
     ltx_video,
     nano_banana,
     plan_shot_durations,
+    REVE_API_BASE,
+    reve_image,
     route_shot,
     runway_image,
     seedance,
@@ -677,6 +679,20 @@ def _generate_image(
         attempts.append((
             "google_imagen",
             lambda: google_imagen(prompt[:1000], "16:9"),
+        ))
+
+    # Reve — api.reve.com. Remix uses reference images natively (up to 6),
+    # making it the best non-Runway option for character/moodboard consistency.
+    if os.environ.get("REVE_API_KEY"):
+        if refs:
+            attempts.append((
+                "reve_remix",
+                lambda: reve_image(prompt, reference_images=refs,
+                                   aspect_ratio="16:9"),
+            ))
+        attempts.append((
+            "reve_create",
+            lambda: reve_image(prompt, aspect_ratio="16:9"),
         ))
 
     last_exc: Exception | None = None
