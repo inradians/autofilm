@@ -2488,16 +2488,23 @@ def compile_final(exp: Experiment, script: dict, storyboard: dict,
             scene_video = VideoFileClip(str(assembled))
             # Guard against audio/video duration drift in the assembled
             # MP4. moviepy reads `duration` from container metadata which
-            # reflects the LONGER of the two streams — so when acrossfade
-            # audio runs a hair past xfade video output, asking moviepy
-            # to read every frame produces 'using last valid frame'
-            # warnings (visible as a 1-3s frozen tail per scene).
-            # Trim moviepy's view to the actual VIDEO STREAM duration.
+            # reflects the LONGER of the two streams — when audio runs a
+            # hair past video output, asking moviepy to read every frame
+            # produces 'using last valid frame' warnings (a 1-3s frozen
+            # tail). Trim moviepy's view to the actual VIDEO STREAM
+            # duration. ONLY trim if the gap is small (<=5s); a larger
+            # gap means something is wrong upstream — silently trimming
+            # in that case would just compound the loss.
             try:
                 from transitions import _ffprobe_video_stream_duration
                 v_only = _ffprobe_video_stream_duration(assembled)
-                if v_only and v_only > 0 and v_only < scene_video.duration:
+                drift = (scene_video.duration - v_only) if v_only else 0
+                if v_only and 0 < drift <= 5.0:
                     scene_video = _subclip(scene_video, 0, v_only)
+                elif drift > 5.0:
+                    print(f"  ⚠ {scene_id}: video stream {v_only:.1f}s "
+                          f"vs container {scene_video.duration:.1f}s "
+                          f"(>5s gap — NOT auto-trimming; check input clips)")
             except Exception:                                         # noqa: BLE001
                 pass
         else:

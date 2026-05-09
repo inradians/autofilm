@@ -282,15 +282,22 @@ def _build_filter_complex(
     width: int,
     height: int,
     fps: int,
-) -> tuple[str, str, str]:
+    has_audio: list[bool] | None = None,
+) -> tuple[str, str, str, float]:
     """Build the filter_complex for chained xfade + acrossfade.
 
-    Returns (filter_complex, last_video_label, last_audio_label).
+    Returns (filter_complex, last_video_label, last_audio_label,
+    total_output_duration).
 
     Math: each xfade overlaps `t.duration` seconds, so the running
     cumulative output duration after the i-th xfade equals
     output_so_far + clip[i+1].duration - t.duration. The xfade `offset`
     parameter is the time at which the fade BEGINS in the running stream.
+
+    has_audio: per-input bool indicating whether that clip has an audio
+    stream. Inputs lacking audio get a silent track injected via
+    anullsrc so the acrossfade chain stays intact (otherwise referring
+    to [{i}:a] for an audio-less input fails the entire filter).
     """
     n = len(durations)
     if n < 2:
@@ -299,21 +306,35 @@ def _build_filter_complex(
         raise ValueError(
             f"Expected {n - 1} transitions for {n} clips, got {len(transitions)}"
         )
+    if has_audio is None:
+        has_audio = [True] * n
+    elif len(has_audio) != n:
+        raise ValueError(f"has_audio len {len(has_audio)} != durations {n}")
 
     parts: list[str] = []
 
     # Step 1 — normalize every input stream to identical (width, height,
-    # fps, sar). xfade requires this; otherwise it errors.
+    # fps, sar). xfade requires this; otherwise it errors. For inputs
+    # lacking an audio track, synthesize silence at the matching duration
+    # via anullsrc so [a{i}] is always defined.
     for i in range(n):
         parts.append(
             f"[{i}:v]scale={width}:{height}:force_original_aspect_ratio=decrease,"
             f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black,"
             f"setsar=1,fps={fps},format=yuv420p[v{i}]"
         )
-        parts.append(
-            f"[{i}:a]aformat=sample_fmts=fltp:channel_layouts=stereo:sample_rates=48000,"
-            f"asetpts=PTS-STARTPTS[a{i}]"
-        )
+        if has_audio[i]:
+            parts.append(
+                f"[{i}:a]aformat=sample_fmts=fltp:channel_layouts=stereo:sample_rates=48000,"
+                f"asetpts=PTS-STARTPTS[a{i}]"
+            )
+        else:
+            # Synthesize silence the length of this clip so the
+            # acrossfade chain has a valid stream to work with.
+            parts.append(
+                f"anullsrc=channel_layout=stereo:sample_rate=48000,"
+                f"atrim=0:{durations[i]:.4f},asetpts=PTS-STARTPTS[a{i}]"
+            )
 
     # Step 2 — chain the xfades. After each xfade the running stream is
     # named v01, v02, ... vNN_out for video and similarly for audio.
@@ -360,7 +381,7 @@ def _build_filter_complex(
         last_v = out_v
         last_a = out_a
 
-    return ";".join(parts), last_v, last_a
+    return ";".join(parts), last_v, last_a, output_so_far
 
 
 def render_clips_with_transitions(
@@ -428,9 +449,16 @@ def render_clips_with_transitions(
 
     # Probe each clip's duration. Required for xfade offset math.
     durations = [_ffprobe_duration(Path(p)) for p in clip_paths]
+    # Also probe whether each clip has an audio stream — some video
+    # backends (LTX fallbacks) produce silent video. Without this, the
+    # filter graph references [{i}:a] for audio-less inputs and the
+    # whole render fails (or worse — the previous '-shortest' behavior
+    # silently truncated the entire scene to nothing).
+    has_audio = [_has_audio_stream(Path(p)) for p in clip_paths]
 
-    filter_complex, last_v, last_a = _build_filter_complex(
+    filter_complex, last_v, last_a, total_duration = _build_filter_complex(
         durations, transitions, width, height, fps,
+        has_audio=has_audio,
     )
 
     cmd: list[str] = ["ffmpeg", "-y", "-loglevel", "error"]
@@ -442,13 +470,17 @@ def render_clips_with_transitions(
         "-c:v", "libx264", "-preset", "medium", "-b:v", bitrate,
         "-pix_fmt", "yuv420p", "-r", str(fps),
         "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
-        # -shortest is critical here: ffmpeg's acrossfade output runs
-        # a hair longer than xfade's video output, so without this the
-        # muxer's duration metadata is longer than the actual video.
-        # moviepy then tries to read N "frames" past the real end of
-        # the video and fills them with the last valid frame — a
-        # visible 1-3s freeze at the tail of every transitioned scene.
-        "-shortest",
+        # Use the EXACT computed video duration as the cap. This:
+        #   1. Prevents the muxer from recording an audio-driven duration
+        #      that's longer than the video (which made moviepy read
+        #      past the actual video end → frozen-frame freezes).
+        #   2. Avoids the catastrophic failure mode of `-shortest`,
+        #      where a missing/short audio track on any input clip
+        #      collapsed the entire scene to a few seconds. Ask any
+        #      take generated by an LTX fallback path that lacks audio:
+        #      `-shortest` truncated the whole scene to that take's
+        #      audio length, dropping ~75% of the rendered film.
+        "-t", f"{total_duration:.4f}",
         str(output_path),
     ]
     subprocess.run(cmd, check=True)
