@@ -135,7 +135,7 @@ MUSIC_STYLE = (
 # effective limit is whatever Runway allows concurrently on your account
 # (typically 10-20 tasks). Set to 1 to disable parallelism entirely
 # (useful for debugging; every print statement appears in order).
-MAX_WORKERS: int = int(os.getenv("MAX_WORKERS", "4"))
+MAX_WORKERS: int = int(os.getenv("MAX_WORKERS", "2"))
 
 # Generation backend selector. Set in .env or shell to switch away from
 # the default without changing any other code.
