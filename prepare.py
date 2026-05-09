@@ -1738,9 +1738,12 @@ def stable_audio(prompt: str, duration_seconds: int = 30) -> bytes:
 
     # Build proper multipart/form-data without a dummy "none" field —
     # the old files={"none": ""} trick causes 400 on some API versions.
+    # NOTE: Stability rejects specific audio subtypes in the Accept
+    # header — it requires "audio/*" or "application/json". The actual
+    # output format is set via the output_format form field below.
     resp = httpx.post(
         "https://api.stability.ai/v2beta/audio/stable-audio-2/text-to-audio",
-        headers={"Authorization": f"Bearer {api_key}", "Accept": "audio/wav"},
+        headers={"Authorization": f"Bearer {api_key}", "Accept": "audio/*"},
         files={
             "prompt":        (None, prompt),
             "duration":      (None, str(duration)),

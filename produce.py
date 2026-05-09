@@ -1539,10 +1539,15 @@ def build_narration(exp: Experiment, script: dict, cast: list[dict]) -> None:
     # Map character_id → preferred voice slot (first character gets
     # rachel, second gets george, etc.). The "narrator" sentinel always
     # uses the default rachel voice.
+    # Cast rows use 'character_id' per CAST_TOOL_SCHEMA, not 'id'. Be
+    # defensive and accept either so this works for stale fixtures too.
     voice_pool = list(RUNWAY_VOICE_IDS.values())
     char_voice: dict[str, str] = {}
     for i, c in enumerate(cast):
-        char_voice[c["id"]] = voice_pool[(i + 1) % len(voice_pool)]
+        cid = c.get("character_id") or c.get("id")
+        if not cid:
+            continue
+        char_voice[cid] = voice_pool[(i + 1) % len(voice_pool)]
 
     def _do_narration(scene: dict) -> None:
         scene_id = scene["id"]
