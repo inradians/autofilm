@@ -15,7 +15,7 @@ dependencies = [
     # Book parsing
     "pdfplumber>=0.11.0",
     # Media assembly
-    "moviepy>=1.0.3",
+    "moviepy>=1.0.3,<2.0.0",   # v2 removed moviepy.editor + renamed core methods
     "ffmpeg-python>=0.2.0",
     "Pillow>=10.4.0",
     # PDF bible generation

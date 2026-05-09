@@ -1672,10 +1672,53 @@ def _resolution_dims() -> tuple[int, int]:
 
 def compile_final(exp: Experiment, script: dict, storyboard: dict,
                    clips_manifest: dict, edl: dict, lookbook: dict) -> Path:
-    from moviepy.editor import (
-        AudioFileClip, CompositeAudioClip, VideoFileClip,
-        concatenate_videoclips, afx,
-    )
+    # moviepy v1 uses moviepy.editor; v2 removed it (everything at top level
+    # with renamed methods). We pin to <2.0.0 in pyproject.toml but guard
+    # here so a mis-installed v2 gives a clear error rather than a traceback.
+    try:
+        from moviepy.editor import (
+            AudioFileClip, CompositeAudioClip, VideoFileClip,
+            concatenate_videoclips, afx,
+        )
+        _moviepy_v1 = True
+    except ModuleNotFoundError:
+        # v2 fallback — import the renamed equivalents.
+        from moviepy import (  # type: ignore[no-redef]
+            AudioFileClip, CompositeAudioClip, VideoFileClip,
+            concatenate_videoclips,
+        )
+        import moviepy.audio.fx as afx  # type: ignore[no-redef]
+        _moviepy_v1 = False
+        import warnings
+        warnings.warn(
+            "moviepy v2 detected. Pin 'moviepy<2.0.0' in pyproject.toml and "
+            "run 'uv sync' to avoid API incompatibilities.",
+            stacklevel=2,
+        )
+
+    def _subclip(clip, t_start, t_end=None):
+        """moviepy v1/v2 compatible subclip."""
+        if _moviepy_v1:
+            return clip.subclip(t_start, t_end) if t_end is not None else clip.subclip(t_start)
+        return clip.subclipped(t_start, t_end) if t_end is not None else clip.subclipped(t_start)
+
+    def _volume(clip, factor: float):
+        """moviepy v1/v2 compatible volume adjustment."""
+        if _moviepy_v1:
+            return clip.fx(afx.volumex, factor)
+        return clip.multiply_volume(factor)
+
+    def _loop_to(clip, duration: float):
+        """moviepy v1/v2 compatible audio looping to target duration."""
+        if _moviepy_v1:
+            return clip.fx(afx.audio_loop, duration=duration)
+        return clip.loop(duration=duration)
+
+    def _set_audio(video_clip, audio_clip):
+        """moviepy v1/v2 compatible set_audio."""
+        if _moviepy_v1:
+            return video_clip.set_audio(audio_clip)
+        return video_clip.with_audio(audio_clip)
 
     decision_by_shot = {(d["scene_id"], d["shot_id"]): d for d in edl["decisions"]}
     scene_order = [s["id"] for s in script["scenes"]]
@@ -1745,9 +1788,9 @@ def compile_final(exp: Experiment, script: dict, storyboard: dict,
                 in_s = d.get("in_seconds") or 0.0
                 out_s = d.get("out_seconds")
                 if out_s and out_s > in_s:
-                    c = c.subclip(in_s, min(out_s, c.duration))
+                    c = _subclip(c, in_s, min(out_s, c.duration))
                 elif in_s > 0:
-                    c = c.subclip(in_s)
+                    c = _subclip(c, in_s)
                 shot_clips.append(c)
             if not shot_clips:
                 continue
@@ -1784,22 +1827,23 @@ def compile_final(exp: Experiment, script: dict, storyboard: dict,
         if scene_video.audio is not None:
             layers.append(scene_video.audio)
         if ambient_path.exists():
-            a = AudioFileClip(str(ambient_path)).fx(afx.volumex, 0.16)
-            a = (a.fx(afx.audio_loop, duration=scene_video.duration)
+            a = _volume(AudioFileClip(str(ambient_path)), 0.16)
+            a = (_loop_to(a, scene_video.duration)
                  if a.duration < scene_video.duration
-                 else a.subclip(0, scene_video.duration))
+                 else _subclip(a, 0, scene_video.duration))
             layers.append(a)
         music_path = exp.path(f"music/{scene_id}.wav")
         if music_path.exists():
-            m = AudioFileClip(str(music_path)).fx(afx.volumex, 0.20)
-            m = (m.fx(afx.audio_loop, duration=scene_video.duration)
+            m = _volume(AudioFileClip(str(music_path)), 0.20)
+            m = (_loop_to(m, scene_video.duration)
                  if m.duration < scene_video.duration
-                 else m.subclip(0, scene_video.duration))
+                 else _subclip(m, 0, scene_video.duration))
             layers.append(m)
         if layers:
-            scene_video = scene_video.set_audio(CompositeAudioClip(layers))
+            scene_video = _set_audio(scene_video, CompositeAudioClip(layers))
 
-        scene_clips.append(scene_video.crossfadein(0.5))
+        scene_clips.append(scene_video.crossfadein(0.5) if _moviepy_v1
+                           else scene_video.with_effects([]))
 
     if not scene_clips:
         raise RuntimeError("No scene clips assembled.")
