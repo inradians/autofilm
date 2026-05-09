@@ -75,10 +75,11 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 EXPERIMENTS_DIR = PROJECT_ROOT / "experiments"
 EXPERIMENTS_DIR.mkdir(exist_ok=True)
 
-# Source book — Crichton's Jurassic Park
-BOOK_PDF_PATH = Path(
-    os.getenv("BOOK_PDF_PATH", "/mnt/user-data/uploads/JurassicPark-MichaelCrichton.pdf")
-)
+# Source book — set BOOK_PDF_PATH env var to point at any PDF. The
+# pipeline derives a per-book slug from the filename so multiple books
+# can coexist under experiments/. No book-specific default is hardcoded;
+# the UI server and CLI runner are both responsible for providing this.
+BOOK_PDF_PATH = Path(os.getenv("BOOK_PDF_PATH", ""))
 
 # Cap on how many scenes to render per experiment. Keeps each run on a
 # fixed budget, like autoresearch's 5-min training cap.

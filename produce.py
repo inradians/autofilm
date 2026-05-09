@@ -33,6 +33,7 @@ from typing import Any
 from prepare import (
     Experiment,
     EXPERIMENTS_DIR,
+    BOOK_PDF_PATH,
     BFL_API_BASE,
     FLUX2_PRO_MODEL,
     FLUX_PRO_MODEL,
@@ -294,19 +295,39 @@ def _parallel_run(
 # STAGE 1 — Parse book → screenplay
 # ============================================================================
 
-PARSE_SYSTEM = """You are a screenwriter analyzing a novel. Extract:
-  - characters[]: every named, speaking character
-  - scenes[]: every distinct screen-worthy scene
-For each scene give id, location, time_of_day, page_start, page_end,
-character ids present, summary, mood, and (optionally) up to 3 short
-dialogue_excerpts — each at most 12 words, capturing the dramatic shape
-of a key line, NOT a verbatim transcription. Return only via the tool."""
+PARSE_SYSTEM = """You are a script supervisor extracting structure from a
+novel for screen adaptation.
+
+For each chunk of pages, return:
+  - book_title:  the actual title of the book (only required from the
+                 chunk that contains the title page; otherwise leave
+                 empty so later chunks don't overwrite it).
+  - book_author: the author's name (same caveat — only the title-page
+                 chunk needs to fill it in).
+  - characters:  every character in this chunk with id, name, description.
+  - scenes:      every scene with id, location, time_of_day, page_start,
+                 page_end, characters present, summary, mood, and
+                 (optionally) up to 3 short dialogue_excerpts — each at
+                 most 12 words, capturing the dramatic shape of a key
+                 line, NOT a verbatim transcription.
+
+Return only via the tool."""
 
 PARSE_TOOL_SCHEMA = {
     "description": "Submit characters and scene index for this chunk.",
     "input_schema": {
         "type": "object",
         "properties": {
+            "book_title": {
+                "type": "string",
+                "description": "Actual book title from the title page. "
+                               "Empty string if this chunk doesn't contain it.",
+            },
+            "book_author": {
+                "type": "string",
+                "description": "Author's name. Empty string if not visible "
+                               "in this chunk.",
+            },
             "characters": {
                 "type": "array",
                 "items": {
@@ -361,6 +382,8 @@ def parse_script(exp: Experiment) -> dict:
     chunks = book_chunks(pages_per_chunk=25)
     characters: list[dict] = []
     scenes: list[dict] = []
+    book_title  = ""
+    book_author = ""
 
     for s, e, text in chunks:
         prior = json.dumps([{"id": c["id"], "name": c["name"]} for c in characters])
@@ -371,6 +394,12 @@ def parse_script(exp: Experiment) -> dict:
             tool_schema=PARSE_TOOL_SCHEMA,
             max_tokens=8000,
         )
+        # Title/author are populated only by the chunk that contains the
+        # title page — keep the first non-empty value we see.
+        if not book_title and result.get("book_title"):
+            book_title = result["book_title"].strip()
+        if not book_author and result.get("book_author"):
+            book_author = result["book_author"].strip()
         # Merge characters by id.
         by_id = {c["id"]: c for c in characters}
         for c in result.get("characters", []):
@@ -382,14 +411,49 @@ def parse_script(exp: Experiment) -> dict:
     if MAX_SCENES:
         scenes = scenes[:MAX_SCENES]
 
+    # Final fallback: if Claude couldn't extract a title from any chunk
+    # (happens for PDFs with no title page, or scanned books with poor
+    # OCR on the cover), humanize the filename so we never end up with
+    # a stale hardcoded title from another book.
+    if not book_title:
+        book_title = _humanize_filename_to_title(BOOK_PDF_PATH)
+    source = (
+        f"{book_title} by {book_author}" if book_author else book_title
+    )
+
     script = {
-        "title": "Jurassic Park",
-        "source": "Jurassic Park by Michael Crichton (1990)",
+        "title":   book_title,
+        "source":  source,
         "characters": characters,
-        "scenes": scenes,
+        "scenes":  scenes,
     }
     exp.write_json("script.json", script)
     return script
+
+
+def _humanize_filename_to_title(path: Path | str) -> str:
+    """Best-effort title from a filename, used only when Claude can't
+    extract a title from the book content.
+
+    Examples:
+      'JurassicPark-MichaelCrichton.pdf' -> 'Jurassic Park'
+      'last_exit_to_brooklyn.pdf'        -> 'Last Exit To Brooklyn'
+      'the_steel_drivin_man.pdf'         -> 'The Steel Drivin Man'
+    """
+    import re
+    p = Path(path) if path else Path("")
+    if not p.name:
+        return "Untitled"
+    stem = p.stem
+    # Drop "-Author" suffix if present (Title-Author convention).
+    if "-" in stem:
+        stem = stem.split("-", 1)[0]
+    # CamelCase / PascalCase → words.
+    stem = re.sub(r"(?<!^)(?=[A-Z])", " ", stem)
+    # Underscores / dashes / dots → spaces.
+    stem = re.sub(r"[_.\-]+", " ", stem).strip()
+    # Title-case each word.
+    return " ".join(w.capitalize() for w in stem.split() if w) or "Untitled"
 
 
 # ============================================================================
