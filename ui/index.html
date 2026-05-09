@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>autofilm — autoresearch loop</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root {
+    --bg:        #0e0f12;
+    --panel:     #16181d;
+    --panel2:    #1d2027;
+    --ink:       #e4e6ea;
+    --muted:     #8a8f99;
+    --border:    #2a2e38;
+    --accent:    #b85c47;   /* rust — same family as the bible PDF */
+    --accent-d:  #8c4234;
+    --good:      #5da877;
+    --bad:       #c75450;
+    --warn:      #d6a85c;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg); color: var(--ink);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text",
+                  "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  header {
+    padding: 16px 24px; border-bottom: 1px solid var(--border);
+    background: var(--panel);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  header h1 {
+    margin: 0; font-size: 18px; font-weight: 600;
+    letter-spacing: 0.04em; text-transform: uppercase;
+    color: var(--accent);
+  }
+  header .meta { color: var(--muted); font-size: 12px; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+
+  main { display: grid; grid-template-columns: 380px 1fr; gap: 0; min-height: calc(100vh - 53px); }
+  aside {
+    background: var(--panel); border-right: 1px solid var(--border);
+    padding: 20px; overflow-y: auto;
+  }
+  section.grid-area { padding: 20px 28px; overflow-y: auto; }
+
+  h2 { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+       color: var(--muted); margin: 0 0 10px; font-weight: 600; }
+  h3 { margin: 0 0 8px; font-size: 14px; font-weight: 600; }
+
+  /* Form */
+  .field { margin-bottom: 14px; }
+  .field label {
+    display: block; font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--muted); margin-bottom: 4px;
+  }
+  .field input[type="text"],
+  .field input[type="number"],
+  .field input[type="file"],
+  .field select {
+    width: 100%; background: var(--panel2); color: var(--ink);
+    border: 1px solid var(--border); border-radius: 4px;
+    padding: 8px 10px; font: inherit;
+  }
+  .field input[type="file"] { padding: 6px; }
+  .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+  button {
+    background: var(--accent); color: white; border: 0;
+    padding: 9px 14px; border-radius: 4px; font: inherit; font-weight: 600;
+    cursor: pointer;
+  }
+  button:hover:not(:disabled) { background: var(--accent-d); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  button.secondary { background: var(--panel2); color: var(--ink); border: 1px solid var(--border); }
+  button.secondary:hover:not(:disabled) { background: var(--border); }
+  button.danger    { background: var(--bad); }
+  button.danger:hover:not(:disabled) { background: #a8423e; }
+
+  .status-bar {
+    background: var(--panel2); border: 1px solid var(--border);
+    border-radius: 4px; padding: 10px 12px; margin: 12px 0;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px;
+  }
+  .status-bar .dot {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--muted); margin-right: 6px; vertical-align: middle;
+  }
+  .status-bar .dot.running { background: var(--warn); animation: pulse 1.4s infinite; }
+  .status-bar .dot.done    { background: var(--good); }
+  .status-bar .dot.error   { background: var(--bad); }
+  @keyframes pulse {
+    0%,100% { opacity: 1; }
+    50%     { opacity: 0.4; }
+  }
+
+  pre.log {
+    background: #0a0b0e; color: #c2c6cf;
+    border: 1px solid var(--border); border-radius: 4px;
+    padding: 10px; max-height: 200px; overflow: auto;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px;
+    line-height: 1.45; white-space: pre-wrap; margin: 6px 0 0;
+  }
+
+  hr.div { border: 0; border-top: 1px solid var(--border); margin: 22px 0; }
+
+  /* Experiment grid */
+  .empty {
+    color: var(--muted); font-style: italic; padding: 60px 20px;
+    text-align: center;
+  }
+  .exp {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 6px; padding: 16px; margin-bottom: 16px;
+  }
+  .exp-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    margin-bottom: 12px;
+  }
+  .exp-head .id {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-weight: 600; font-size: 14px;
+  }
+  .exp-head .loss {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px;
+  }
+  .exp-head .loss .v { color: var(--accent); font-weight: 600; }
+
+  .scores { display: flex; gap: 12px; font-size: 11px; color: var(--muted);
+            margin-bottom: 14px; font-family: ui-monospace, monospace; }
+  .scores span b { color: var(--ink); }
+
+  .stage { margin-top: 14px; }
+  .stage h4 {
+    margin: 0 0 8px; font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);
+  }
+
+  .thumbs {
+    display: grid; gap: 6px;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  }
+  .thumbs.video {
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  }
+  .thumb {
+    background: #000; border: 1px solid var(--border); border-radius: 3px;
+    overflow: hidden; aspect-ratio: 16 / 9; position: relative;
+  }
+  .thumb img, .thumb video {
+    width: 100%; height: 100%; object-fit: cover; display: block;
+  }
+  .thumb .cap {
+    position: absolute; bottom: 0; left: 0; right: 0;
+    background: linear-gradient(to top, rgba(0,0,0,0.85), transparent);
+    color: #fff; font-size: 10px; padding: 12px 6px 4px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    pointer-events: none;
+  }
+
+  .final-mp4 { aspect-ratio: 16 / 9; max-width: 640px; }
+
+  .pill {
+    display: inline-block; padding: 1px 6px; border-radius: 10px;
+    font-size: 10px; font-family: ui-monospace, monospace;
+    margin-left: 6px; background: var(--panel2); border: 1px solid var(--border);
+    color: var(--muted);
+  }
+  .pill.parent  { color: var(--warn); border-color: var(--warn); }
+
+  /* Plan summary */
+  .plan {
+    font-size: 11px; color: var(--muted); margin-top: 6px;
+    font-family: ui-monospace, monospace;
+  }
+
+  details { margin-top: 8px; }
+  details summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+  details summary:hover { color: var(--ink); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>autofilm · autoresearch loop</h1>
+  <div class="meta" id="meta">connecting…</div>
+</header>
+
+<main>
+  <!-- ── Sidebar ───────────────────────────────────────────── -->
+  <aside>
+    <h2>configure run</h2>
+
+    <form id="runForm" enctype="multipart/form-data">
+      <div class="field">
+        <label for="book_path">book pdf path</label>
+        <input id="book_path" name="book_path" type="text"
+               placeholder="/path/to/book.pdf" required />
+      </div>
+
+      <div class="field">
+        <label for="moodboards">moodboard examples (images)</label>
+        <input id="moodboards" name="moodboards" type="file"
+               accept="image/png,image/jpeg,image/webp" multiple />
+      </div>
+
+      <div class="field">
+        <label for="director">director  <span style="text-transform:none;color:var(--muted)">(optional)</span></label>
+        <input id="director" name="director" type="text"
+               placeholder="e.g. Denis Villeneuve" />
+      </div>
+
+      <div class="field">
+        <label for="cinematographer">cinematographer  <span style="text-transform:none;color:var(--muted)">(optional)</span></label>
+        <input id="cinematographer" name="cinematographer" type="text"
+               placeholder="e.g. Roger Deakins" />
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <label for="iterations">iterations</label>
+          <input id="iterations" name="iterations" type="number"
+                 value="3" min="1" max="20" />
+        </div>
+        <div class="field">
+          <label for="threshold">threshold</label>
+          <select id="threshold" name="threshold">
+            <option value="low">low</option>
+            <option value="medium" selected>medium</option>
+            <option value="high">high</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="target_loss">target film_loss</label>
+        <input id="target_loss" name="target_loss" type="number"
+               value="0.15" min="0" max="1" step="0.01" />
+      </div>
+
+      <button type="submit" id="startBtn">start run</button>
+      <button type="button" id="stopBtn" class="danger" style="display:none">stop</button>
+    </form>
+
+    <div class="status-bar" id="runStatus">
+      <span class="dot"></span><span id="runStatusText">idle</span>
+    </div>
+    <details>
+      <summary>log tail</summary>
+      <pre class="log" id="runLog"></pre>
+    </details>
+
+    <hr class="div" />
+
+    <h2>api smoke test</h2>
+    <div class="field-row">
+      <div class="field">
+        <label for="smokeCategory">category</label>
+        <select id="smokeCategory">
+          <option value="all">all</option>
+          <option value="image">image</option>
+          <option value="video">video</option>
+          <option value="audio">audio</option>
+        </select>
+      </div>
+      <div class="field" style="display:flex;align-items:flex-end">
+        <button type="button" id="smokeBtn" class="secondary"
+                style="width:100%">run</button>
+      </div>
+    </div>
+
+    <div class="status-bar" id="smokeStatus">
+      <span class="dot"></span><span id="smokeStatusText">idle</span>
+    </div>
+    <details>
+      <summary>log tail</summary>
+      <pre class="log" id="smokeLog"></pre>
+    </details>
+  </aside>
+
+  <!-- ── Main grid ─────────────────────────────────────────── -->
+  <section class="grid-area">
+    <h2>experiments</h2>
+    <div id="experiments"><div class="empty">No experiments yet — start a run to populate this grid.</div></div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+// ── Render helpers ──────────────────────────────────────────
+
+function artifactURL(book_slug, exp_id, relpath) {
+  return `/api/artifact/${encodeURIComponent(book_slug)}/${encodeURIComponent(exp_id)}/${relpath}`;
+}
+
+function thumbImg(book_slug, exp_id, relpath, caption) {
+  const wrap = document.createElement('div');
+  wrap.className = 'thumb';
+  const img = document.createElement('img');
+  img.loading = 'lazy';
+  img.src = artifactURL(book_slug, exp_id, relpath);
+  wrap.appendChild(img);
+  if (caption) {
+    const cap = document.createElement('div');
+    cap.className = 'cap';
+    cap.textContent = caption;
+    wrap.appendChild(cap);
+  }
+  return wrap;
+}
+
+function thumbVideo(book_slug, exp_id, relpath, caption) {
+  const wrap = document.createElement('div');
+  wrap.className = 'thumb';
+  const v = document.createElement('video');
+  v.src = artifactURL(book_slug, exp_id, relpath);
+  v.muted = true; v.controls = true; v.preload = 'metadata';
+  wrap.appendChild(v);
+  if (caption) {
+    const cap = document.createElement('div');
+    cap.className = 'cap';
+    cap.textContent = caption;
+    wrap.appendChild(cap);
+  }
+  return wrap;
+}
+
+function makeStage(title) {
+  const stage = document.createElement('div');
+  stage.className = 'stage';
+  const h4 = document.createElement('h4');
+  h4.textContent = title;
+  stage.appendChild(h4);
+  return stage;
+}
+
+function renderExperiment(exp) {
+  const card = document.createElement('div');
+  card.className = 'exp';
+
+  const head = document.createElement('div');
+  head.className = 'exp-head';
+
+  const left = document.createElement('div');
+  const idEl = document.createElement('span');
+  idEl.className = 'id';
+  idEl.textContent = exp.qualified;
+  left.appendChild(idEl);
+  if (exp.bible && exp.bible.parent_exp) {
+    const pill = document.createElement('span');
+    pill.className = 'pill parent';
+    pill.textContent = `← ${exp.bible.parent_exp}`;
+    left.appendChild(pill);
+  }
+  if (!exp.has_final) {
+    const pill = document.createElement('span');
+    pill.className = 'pill';
+    pill.textContent = 'in progress';
+    left.appendChild(pill);
+  }
+  head.appendChild(left);
+
+  if (exp.bible && exp.bible.metric) {
+    const m  = exp.bible.metric;
+    const r  = document.createElement('div');
+    r.className = 'loss';
+    r.innerHTML = `film_loss = <span class="v">${m.film_loss?.toFixed(4)}</span>`;
+    head.appendChild(r);
+  }
+  card.appendChild(head);
+
+  // Per-axis scores
+  if (exp.bible && exp.bible.metric && exp.bible.metric.scores) {
+    const s = exp.bible.metric.scores;
+    const sc = document.createElement('div');
+    sc.className = 'scores';
+    for (const [k, v] of Object.entries(s)) {
+      sc.innerHTML += `<span>${k} <b>${v.toFixed(3)}</b></span>`;
+    }
+    card.appendChild(sc);
+  }
+
+  // Carryover plan summary (what was changed in this iter vs parent)
+  if (exp.bible && exp.bible.carryover_from_parent) {
+    const co = exp.bible.carryover_from_parent;
+    const flags = [];
+    for (const [k, v] of Object.entries(co)) {
+      if (k.startsWith('regen_') && v !== false && v !== null
+          && !(Array.isArray(v) && v.length === 0)) {
+        flags.push(`${k.replace('regen_','')}=${
+          v === 'all' ? 'all' :
+          Array.isArray(v) ? v.length : 'true'}`);
+      }
+    }
+    if (flags.length) {
+      const p = document.createElement('div');
+      p.className = 'plan';
+      p.textContent = `regen: ${flags.join(', ')}`;
+      card.appendChild(p);
+    }
+  }
+
+  if (!exp.bible || !exp.bible.stages) {
+    const note = document.createElement('div');
+    note.style.color = 'var(--muted)';
+    note.style.fontStyle = 'italic';
+    note.style.padding = '12px 0';
+    note.textContent = 'production_bible.json not yet written.';
+    card.appendChild(note);
+    return card;
+  }
+
+  const stages = exp.bible.stages;
+  const slug   = exp.book_slug;
+  const eid    = exp.exp_id;
+
+  // Lookbook style frame
+  if (stages.lookbook && stages.lookbook.style_frame) {
+    const s = makeStage('lookbook style frame');
+    const grid = document.createElement('div');
+    grid.className = 'thumbs';
+    grid.appendChild(thumbImg(slug, eid, stages.lookbook.style_frame, 'style_frame'));
+    s.appendChild(grid);
+    card.appendChild(s);
+  }
+
+  // Character references
+  if (stages.references && stages.references.by_scene_char) {
+    const refs = stages.references.by_scene_char;
+    const keys = Object.keys(refs).slice(0, 12);
+    if (keys.length) {
+      const s = makeStage(`character references (${Object.keys(refs).length})`);
+      const grid = document.createElement('div');
+      grid.className = 'thumbs';
+      for (const k of keys) {
+        grid.appendChild(thumbImg(slug, eid, refs[k], k));
+      }
+      s.appendChild(grid);
+      card.appendChild(s);
+    }
+  }
+
+  // Location moodboards
+  if (stages.locations && stages.locations.moodboards) {
+    const mbs = stages.locations.moodboards;
+    const keys = Object.keys(mbs);
+    if (keys.length) {
+      const s = makeStage(`location moodboards (${keys.length})`);
+      const grid = document.createElement('div');
+      grid.className = 'thumbs';
+      for (const k of keys) {
+        grid.appendChild(thumbImg(slug, eid, mbs[k], k));
+      }
+      s.appendChild(grid);
+      card.appendChild(s);
+    }
+  }
+
+  // First frames per shot
+  if (stages.frames && stages.frames.by_scene_shot) {
+    const frames = stages.frames.by_scene_shot;
+    const keys = Object.keys(frames).slice(0, 24);
+    if (keys.length) {
+      const s = makeStage(`first frames (${Object.keys(frames).length})`);
+      const grid = document.createElement('div');
+      grid.className = 'thumbs';
+      for (const k of keys) {
+        grid.appendChild(thumbImg(slug, eid, frames[k], k));
+      }
+      s.appendChild(grid);
+      card.appendChild(s);
+    }
+  }
+
+  // Clips / takes
+  if (stages.clips && stages.clips.by_scene_shot_take) {
+    const clips = stages.clips.by_scene_shot_take;
+    const keys = Object.keys(clips).slice(0, 12);
+    if (keys.length) {
+      const s = makeStage(`takes (${Object.keys(clips).length})`);
+      const grid = document.createElement('div');
+      grid.className = 'thumbs video';
+      for (const k of keys) {
+        grid.appendChild(thumbVideo(slug, eid, clips[k], k));
+      }
+      s.appendChild(grid);
+      card.appendChild(s);
+    }
+  }
+
+  // Final film
+  if (stages.final && stages.final.path) {
+    const s = makeStage('final.mp4');
+    const wrap = document.createElement('div');
+    wrap.className = 'thumb final-mp4';
+    const v = document.createElement('video');
+    v.src = artifactURL(slug, eid, stages.final.path);
+    v.controls = true; v.preload = 'metadata';
+    wrap.appendChild(v);
+    s.appendChild(wrap);
+    card.appendChild(s);
+  }
+
+  return card;
+}
+
+// ── Status bar ──────────────────────────────────────────────
+
+function setStatus(elPrefix, snap) {
+  const dot  = document.querySelector(`#${elPrefix}Status .dot`);
+  const text = $(`${elPrefix}StatusText`);
+  dot.className = 'dot ' + snap.status;
+  let txt = snap.status;
+  if (snap.is_running && snap.config && Object.keys(snap.config).length) {
+    const c = snap.config;
+    if (c.iterations) txt += ` · ${c.iterations} iter`;
+    if (c.category) txt += ` · ${c.category}`;
+  }
+  if (snap.exit_code !== null && snap.exit_code !== undefined && !snap.is_running) {
+    txt += ` · exit ${snap.exit_code}`;
+  }
+  text.textContent = txt;
+}
+
+function renderLogTail(elId, lines) {
+  const el = $(elId);
+  el.textContent = (lines || []).join('\n');
+  el.scrollTop = el.scrollHeight;
+}
+
+// ── Polling loop ─────────────────────────────────────────────
+
+let pollTimer = null;
+async function poll() {
+  try {
+    const resp = await fetch('/api/state');
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+
+    setStatus('run',   data.run);
+    setStatus('smoke', data.smoke);
+    renderLogTail('runLog',   data.run.log_tail);
+    renderLogTail('smokeLog', data.smoke.log_tail);
+
+    // Toggle start/stop visibility
+    $('startBtn').style.display = data.run.is_running ? 'none' : '';
+    $('stopBtn').style.display  = data.run.is_running ? '' : 'none';
+
+    // Render experiment grid
+    const target = $('experiments');
+    if (!data.experiments || data.experiments.length === 0) {
+      target.innerHTML = '<div class="empty">No experiments yet — start a run to populate this grid.</div>';
+    } else {
+      target.innerHTML = '';
+      for (const exp of data.experiments) {
+        target.appendChild(renderExperiment(exp));
+      }
+    }
+
+    $('meta').textContent = `connected · ${data.experiments?.length || 0} experiment(s)`;
+  } catch (e) {
+    $('meta').textContent = `disconnected (${e.message})`;
+  }
+}
+
+function startPolling() {
+  poll();
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(poll, 3000);
+}
+
+// ── Form handlers ────────────────────────────────────────────
+
+$('runForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  $('startBtn').disabled = true;
+  try {
+    const r = await fetch('/api/start', { method: 'POST', body: fd });
+    const j = await r.json();
+    if (!r.ok) {
+      alert('Start failed: ' + (j.error || r.statusText));
+    }
+  } catch (e) {
+    alert('Start failed: ' + e.message);
+  } finally {
+    $('startBtn').disabled = false;
+    poll();
+  }
+});
+
+$('stopBtn').addEventListener('click', async () => {
+  if (!confirm('Stop the running pipeline?')) return;
+  await fetch('/api/stop', { method: 'POST' });
+  poll();
+});
+
+$('smokeBtn').addEventListener('click', async () => {
+  const fd = new FormData();
+  fd.append('category', $('smokeCategory').value);
+  $('smokeBtn').disabled = true;
+  try {
+    const r = await fetch('/api/smoke-test', { method: 'POST', body: fd });
+    const j = await r.json();
+    if (!r.ok) alert('Smoke test failed: ' + (j.error || r.statusText));
+  } catch (e) {
+    alert('Smoke test failed: ' + e.message);
+  } finally {
+    $('smokeBtn').disabled = false;
+    poll();
+  }
+});
+
+startPolling();
+</script>
+
+</body>
+</html>

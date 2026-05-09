@@ -32,6 +32,7 @@ from typing import Any
 
 from prepare import (
     Experiment,
+    EXPERIMENTS_DIR,
     BFL_API_BASE,
     FLUX2_PRO_MODEL,
     FLUX_PRO_MODEL,
@@ -1063,6 +1064,33 @@ LOOKBOOK_TOOL_SCHEMA = {
 }
 
 
+def _load_user_moodboards(exp: Experiment) -> list[bytes]:
+    """Read user-uploaded moodboard images for this experiment's book.
+
+    Saved by the UI server to experiments/<book_slug>/user_moodboards/.
+    Returns a list of image bytes in lexicographic filename order, or
+    an empty list if the directory doesn't exist or is empty.
+
+    Located per-book (not per-experiment) so uploaded references carry
+    forward across iterations of the autoresearch loop without the user
+    re-uploading them each time.
+    """
+    mb_dir = EXPERIMENTS_DIR / exp.book_slug / "user_moodboards"
+    if not mb_dir.is_dir():
+        return []
+    refs: list[bytes] = []
+    for p in sorted(mb_dir.iterdir()):
+        if not p.is_file():
+            continue
+        if p.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"}:
+            continue
+        try:
+            refs.append(p.read_bytes())
+        except Exception:
+            continue
+    return refs
+
+
 def build_lookbook(exp: Experiment, script: dict, locations: list[dict]) -> dict:
     if exp.has("lookbook.json"):
         return exp.read_json("lookbook.json")
@@ -1100,13 +1128,29 @@ def build_lookbook(exp: Experiment, script: dict, locations: list[dict]) -> dict
         lookbook["cinematographer"] = CINEMATOGRAPHER
 
     # Render the iconic style frame.
+    # If the user uploaded moodboard examples via the UI, they're saved
+    # under experiments/<book_slug>/user_moodboards/ — use them as refs
+    # so the style frame inherits the user's intended aesthetic.
+    user_mb_refs: list[bytes] = _load_user_moodboards(exp)
+
     try:
-        sf = _generate_image_t2i(
-            prompt=lookbook["style_frame_prompt"],
-            size="1792x1024",
-            quality="high",
-            context="lookbook/style_frame",
-        )
+        if user_mb_refs:
+            # Use the FIRST user moodboard as the primary style ref.
+            sf = _generate_image_with_refs(
+                prompt=lookbook["style_frame_prompt"],
+                refs=user_mb_refs[:3],   # up to 3 refs for the style frame
+                size="1792x1024",
+                quality="high",
+                context="lookbook/style_frame",
+            )
+            print(f"  using {len(user_mb_refs[:3])} user moodboard(s) as style refs")
+        else:
+            sf = _generate_image_t2i(
+                prompt=lookbook["style_frame_prompt"],
+                size="1792x1024",
+                quality="high",
+                context="lookbook/style_frame",
+            )
         exp.write_bytes("lookbook/style_frame.png", sf)
     except Exception as e:  # noqa: BLE001
         print(f"  Style frame failed: {e}")
