@@ -1161,6 +1161,48 @@ def gpt_image(prompt: str, size: str = "1792x1024", quality: str = "high") -> by
     return runway_image(prompt, model=GPT_IMAGE_MODEL, ratio=ratio)
 
 
+def openai_image(
+    prompt: str,
+    size: str = "1536x1024",
+    quality: str = "medium",
+) -> bytes:
+    """GPT Image 1 via OpenAI API directly (not through Runway).
+
+    Uses a separate OPENAI_API_KEY and billing account — independent of
+    Runway's daily task limits. Falls back to this when gpt_image (Runway)
+    hits its quota.
+
+    Sizes:  '1024x1024' (square), '1536x1024' (landscape), '1024x1536' (portrait)
+    Quality: 'low' | 'medium' | 'high' | 'auto'
+
+    Returns PNG bytes (decoded from the base64 JSON response).
+    """
+    import base64 as _b64
+    api_key = _require_key("OPENAI_API_KEY")
+    resp = httpx.post(
+        "https://api.openai.com/v1/images/generations",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type":  "application/json",
+        },
+        json={
+            "model":   "gpt-image-1",
+            "prompt":  prompt[:32000],  # model supports long prompts
+            "n":       1,
+            "size":    size,
+            "quality": quality,
+        },
+        timeout=180.0,
+    )
+    if not resp.is_success:
+        try:
+            detail = resp.json()
+        except Exception:
+            detail = resp.text[:400]
+        raise RuntimeError(f"OpenAI image {resp.status_code}: {detail}")
+    return _b64.b64decode(resp.json()["data"][0]["b64_json"])
+
+
 def nano_banana(prompt: str, reference_images: list[bytes] | None = None) -> bytes:
     """Nano Banana — Gemini Image 3 Pro via Runway.
 

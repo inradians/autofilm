@@ -61,6 +61,7 @@ from prepare import (
     google_veo,
     ltx_video,
     nano_banana,
+    openai_image,
     plan_shot_durations,
     REVE_API_BASE,
     reve_image,
@@ -663,6 +664,8 @@ def _generate_image(
 
     if runway_ok:
         attempts += [
+            ("gpt_image",
+             lambda: gpt_image(prompt, size=size, quality=quality)),
             ("nano_banana",
              lambda: nano_banana(prompt[:950],
                                  reference_images=refs or None)),
@@ -670,6 +673,14 @@ def _generate_image(
              lambda: nano_banana(_rephrase_prompt(prompt)[:950],
                                  reference_images=refs or None)),
         ]
+
+    # OpenAI direct — separate billing from Runway, independent daily limit.
+    if os.environ.get("OPENAI_API_KEY"):
+        attempts.insert(
+            1,  # always slot in as 2nd attempt, after gpt_image (Runway)
+            ("openai_image",
+             lambda: openai_image(prompt, size="1536x1024", quality="medium")),
+        )
 
     # Reve Remix — ref-aware, non-Runway (REVE_API_KEY).
     if os.environ.get("REVE_API_KEY") and refs:
@@ -691,7 +702,7 @@ def _generate_image(
                 _record_daily_limit(e, context)
                 runway_ok = False
                 attempts = [(l, f) for l, f in attempts
-                            if not l.startswith("nano_banana")]
+                            if not l.startswith(("gpt_image", "nano_banana"))]
             _tprint(f"    ✗ [{label}] {context}: {e}")
             last_exc = e
 
