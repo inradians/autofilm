@@ -358,12 +358,44 @@ def _section_heading(s: dict, doc: BibleDocTemplate, text: str, level: int = 0) 
     return p
 
 
-def _fitted_image(path: Path, max_w: float, max_h: float) -> RLImage:
-    """Image scaled to fit within (max_w, max_h) preserving aspect ratio."""
-    img = RLImage(str(path))
+def _fitted_image(
+    path: Path, max_w: float, max_h: float, quality: int = 80
+) -> RLImage:
+    """Image scaled to fit within (max_w, max_h), recompressed as JPEG.
+
+    PNG frames can be 1–3 MB each; a quality-80 JPEG of the same content
+    is typically 100–400 kB. Embedding 20–50 compressed JPEGs instead of
+    raw PNGs drops a 100 MB bible to 5–15 MB.
+
+    RGBA / palette images are flattened to RGB before JPEG encoding
+    (JPEG has no alpha channel). A white background is composited so
+    transparent regions don't go black.
+
+    Args:
+        quality: JPEG quality 1–95 (default 80 — good balance of size
+                 and fidelity for screen-quality reference images).
+    """
+    from PIL import Image as _PIL
+    import io
+
+    with _PIL.open(path) as pil:
+        if pil.mode in ("RGBA", "LA", "P"):
+            # Composite onto white so transparent areas don't turn black
+            bg = _PIL.new("RGB", pil.size, (255, 255, 255))
+            src = pil.convert("RGBA")
+            bg.paste(src, mask=src.split()[3])
+            pil = bg
+        elif pil.mode != "RGB":
+            pil = pil.convert("RGB")
+
+        buf = io.BytesIO()
+        pil.save(buf, format="JPEG", quality=quality, optimize=True)
+        buf.seek(0)
+
+    img = RLImage(buf)
     iw, ih = img.imageWidth, img.imageHeight
     scale = min(max_w / iw, max_h / ih)
-    img.drawWidth = iw * scale
+    img.drawWidth  = iw * scale
     img.drawHeight = ih * scale
     return img
 
