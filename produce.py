@@ -25,7 +25,7 @@ import base64
 import json
 import os
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ALL_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path
 from typing import Any
 
@@ -131,42 +131,81 @@ def _parallel_run(
     *,
     workers: int | None = None,
 ) -> list:
-    """Run worker_fn(item) for each item concurrently, collect results.
+    """Submit all work items to a thread pool, then block at an explicit
+    barrier until every job has finished OR failed before returning.
 
-    Falls back to serial execution when MAX_WORKERS == 1 (or when there's
-    only one item) so debugging and profiling remain easy.
+    The barrier guarantees that the next pipeline stage never starts while
+    any job from the current stage is still running. It uses
+    ``concurrent.futures.wait(return_when=ALL_COMPLETED)`` rather than
+    ``as_completed`` so the semantics are unambiguous: we wait for the
+    complete set, not just for items as they trickle in.
+
+    Falls back to serial execution when MAX_WORKERS == 1 or work_items
+    has only one item (easier to debug; logs appear in order).
 
     Args:
-        label:      Short description used in failure messages.
-        work_items: List of arguments — one per worker_fn call.
-        worker_fn:  Callable that takes one item and returns a result.
-                    Must be thread-safe (no shared mutable state, or with
-                    appropriate locks around it).
-        workers:    Override for MAX_WORKERS. Defaults to MAX_WORKERS.
+        label:      Short stage name used in progress and failure messages.
+        work_items: One argument per worker_fn call.
+        worker_fn:  Thread-safe callable; receives one item, returns a result.
+        workers:    Pool size override. Defaults to MAX_WORKERS.
 
     Returns:
-        List of successful return values (order is completion order, not
-        input order). Failed items are logged and omitted.
+        List of successful return values (order matches completion order,
+        not input order). Failed items are logged and omitted.
     """
     n = workers if workers is not None else MAX_WORKERS
+
+    # ── Serial path ──────────────────────────────────────────────────────
     if n <= 1 or len(work_items) <= 1:
         results = []
-        for item in work_items:
+        for i, item in enumerate(work_items, 1):
+            print(f"  [{label}] {i}/{len(work_items)}")
             try:
                 results.append(worker_fn(item))
             except Exception as e:  # noqa: BLE001
-                print(f"  ✗ {label}: {e}")
+                print(f"  ✗ [{label}] job {i} failed: {e}")
         return results
 
-    results: list = []
+    # ── Parallel path ────────────────────────────────────────────────────
+    n_jobs = len(work_items)
+    print(f"  ┌─ [{label}] submitting {n_jobs} job(s) "
+          f"(MAX_WORKERS={n}) ─────────────────")
+
     with ThreadPoolExecutor(max_workers=n) as pool:
-        futures = {pool.submit(worker_fn, item): item for item in work_items}
-        for future in as_completed(futures):
-            item = futures[future]
-            try:
-                results.append(future.result())
-            except Exception as e:  # noqa: BLE001
-                _tprint(f"  ✗ {label} {item}: {e}")
+        future_to_item = {pool.submit(worker_fn, item): item
+                          for item in work_items}
+
+        # ── BARRIER ──────────────────────────────────────────────────────
+        # Block here until every submitted future has either completed
+        # successfully or raised an exception. The next stage only starts
+        # after this returns.
+        done, not_done = wait(future_to_item, return_when=ALL_COMPLETED)
+        # ─────────────────────────────────────────────────────────────────
+
+    # With ALL_COMPLETED, not_done is always empty — but handle it
+    # defensively in case of executor edge cases.
+    for f in not_done:
+        item = future_to_item[f]
+        _tprint(f"  ✗ [{label}] job did not complete (cancelled?): {item}")
+        try:
+            f.cancel()
+        except Exception:
+            pass
+
+    results: list = []
+    n_ok = n_fail = 0
+    for f in done:
+        try:
+            results.append(f.result())
+            n_ok += 1
+        except Exception as e:  # noqa: BLE001
+            n_fail += 1
+            item = future_to_item[f]
+            _tprint(f"  ✗ [{label}] failed: {e}")
+
+    status = "✓ all succeeded" if n_fail == 0 else f"✓ {n_ok} ok  ✗ {n_fail} failed"
+    print(f"  └─ [{label}] barrier cleared — {status} "
+          f"({n_jobs} job(s)) ────────────────")
     return results
 
 
