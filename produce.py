@@ -62,6 +62,7 @@ from prepare import (
     plan_shot_durations,
     route_shot,
     runway_image,
+    seedance,
     stable_audio,
     veo,
     veo_final_model,
@@ -516,6 +517,180 @@ def _rephrase_prompt(original: str) -> str:
     )
 
 
+# ── Unified generation helpers with automatic model fallback ─────────────────
+#
+# _generate_video() and _generate_image() try each model in priority order.
+# On any failure (rate limit, content filter, timeout, API error) they log
+# and move to the next model. The pipeline never fails because one model
+# is having issues.
+#
+# Reference images and moodboards are passed to every model that accepts
+# them so visual consistency is preserved across shots regardless of which
+# model ends up generating the clip or frame.
+
+def _generate_video(
+    prompt: str,
+    first_frame: bytes,
+    ref_imgs: list[bytes],
+    moodboard: bytes | None,
+    duration: int,
+    seed: int,
+    context: str,
+) -> bytes:
+    """Generate a video clip with automatic model fallback.
+
+    Attempt order:
+      1. SeedDance 2 (ByteDance via Runway) — primary, accepts ref images
+      2. Veo 3.1 fast (Google via Runway)   — Runway fallback
+      3. LTX 2.3 (Lightricks API)           — non-Runway fallback
+      4. Google Veo 3.1 (direct)            — last resort
+
+    Reference images (character refs + optional moodboard) are passed to
+    every model that accepts them. Models that don't support refs (Veo via
+    Runway, Google Veo, LTX) receive only the first frame for guidance.
+
+    Raises RuntimeError only if every model fails.
+    """
+    # Build reference list: character refs first, moodboard last
+    refs = ref_imgs[:3]
+    if moodboard and len(refs) < 3:
+        refs = refs + [moodboard]
+
+    # Check Runway daily limit before attempting Runway models
+    runway_ok = not _daily_limit_hit.is_set()
+
+    attempts: list[tuple[str, Any]] = []
+
+    if runway_ok:
+        attempts.append((
+            "seedance",
+            lambda: seedance(prompt, first_frame,
+                             reference_images=refs or None,
+                             duration_seconds=duration, seed=seed),
+        ))
+        attempts.append((
+            "veo",
+            lambda: veo(prompt, first_frame,
+                        duration_seconds=duration, seed=seed),
+        ))
+
+    # Non-Runway fallbacks — always available regardless of Runway limits
+    if os.environ.get("LTX_API_KEY"):
+        attempts.append((
+            "ltx",
+            lambda: ltx_video(prompt, first_frame,
+                               duration_seconds=duration,
+                               resolution="720p", seed=seed),
+        ))
+    if os.environ.get("GOOGLE_AI_API_KEY"):
+        attempts.append((
+            "google_veo",
+            lambda: google_veo(prompt, first_frame,
+                               duration_seconds=duration,
+                               resolution="720p"),
+        ))
+
+    last_exc: Exception | None = None
+    for label, fn in attempts:
+        try:
+            _tprint(f"    [{label}] video {context}")
+            result = fn()
+            _tprint(f"    ✓ [{label}] {context} ({len(result)//1024}kB)")
+            return result
+        except Exception as e:  # noqa: BLE001
+            if _is_daily_limit(e):
+                _record_daily_limit(e, context)
+                # Mark Runway as unavailable and skip remaining Runway attempts
+                runway_ok = False
+                attempts = [(l, f) for l, f in attempts
+                            if l not in ("seedance", "veo")]
+            _tprint(f"    ✗ [{label}] {context}: {e}")
+            last_exc = e
+
+    raise RuntimeError(
+        f"All video models failed for {context}. Last: {last_exc}"
+    )
+
+
+def _generate_image(
+    prompt: str,
+    ref_imgs: list[bytes],
+    moodboard: bytes | None,
+    size: str = "1792x1024",
+    quality: str = "high",
+    context: str = "",
+) -> bytes:
+    """Generate an image with automatic model fallback.
+
+    Attempt order:
+      1. GPT Image 2 (via Runway)            — best instruction-following
+      2. nano_banana + refs (via Runway)      — Runway fallback, accepts refs
+      3. Google Imagen 3                      — non-Runway fallback
+
+    The rephrased prompt is generated once on first failure and reused for
+    subsequent attempts. Reference images and moodboard are passed to
+    nano_banana for visual consistency.
+
+    Raises RuntimeError only if every model fails.
+    """
+    refs = ref_imgs[:2]
+    if moodboard and len(refs) < 2:
+        refs = refs + [moodboard]
+
+    runway_ok  = not _daily_limit_hit.is_set()
+    rephrased: str | None = None
+
+    def get_rephrased() -> str:
+        nonlocal rephrased
+        if rephrased is None:
+            rephrased = _rephrase_prompt(prompt)
+        return rephrased
+
+    attempts: list[tuple[str, Any]] = []
+
+    if runway_ok:
+        attempts += [
+            ("gpt_image",
+             lambda: gpt_image(prompt, size=size, quality=quality)),
+            ("gpt_image*",
+             lambda: gpt_image(get_rephrased(), size=size, quality="standard")),
+            ("nano_banana",
+             lambda: nano_banana(prompt[:950],
+                                 reference_images=refs or None)),
+            ("nano_banana*",
+             lambda: nano_banana(get_rephrased()[:950],
+                                 reference_images=refs or None)),
+        ]
+
+    if os.environ.get("GOOGLE_AI_API_KEY"):
+        attempts.append((
+            "google_imagen",
+            lambda: google_imagen(prompt[:1000], "16:9"),
+        ))
+
+    last_exc: Exception | None = None
+    for label, fn in attempts:
+        try:
+            _tprint(f"    [{label}] image {context}")
+            result = fn()
+            _tprint(f"    ✓ [{label}] {context} ({len(result)//1024}kB)")
+            return result
+        except Exception as e:  # noqa: BLE001
+            if _is_daily_limit(e):
+                _record_daily_limit(e, context)
+                runway_ok = False
+                attempts = [(l, f) for l, f in attempts
+                            if not l.startswith(("gpt_image", "nano_banana"))]
+            _tprint(f"    ✗ [{label}] {context}: {e}")
+            last_exc = e
+
+    raise RuntimeError(
+        f"All image models failed for {context}. Last: {last_exc}"
+    )
+
+
+
+
 def _veo_first_frame(image_prompt: str) -> bytes:
     """Generate the shortest Veo clip and extract its first frame as PNG.
     Used as the final moodboard fallback when image models reject a prompt.
@@ -898,41 +1073,35 @@ def build_references(exp: Experiment, script: dict, cast: list[dict],
 
         ref_prompt = _reference_prompt(character, scene, lookbook)
 
-        if IMAGE_BACKEND == "google":
-            model_attempts = [
-                ("imagen3",    lambda: google_imagen(ref_prompt, "16:9")),
-                ("gpt_image",  lambda: gpt_image(ref_prompt, size="1344x768", quality="standard")),
-                ("nano_banana", lambda: nano_banana(ref_prompt)),
-            ]
-        else:
-            model_attempts = [
-                ("gpt_image",  lambda: gpt_image(ref_prompt, size="1344x768", quality="standard")),
-                ("nano_banana", lambda: nano_banana(ref_prompt)),
-            ]
+        # Load moodboard for this scene if available
+        scene_moodboard: bytes | None = None
+        scene_loc = loc_by_scene.get(scene_id)
+        if scene_loc:
+            mb_paths = scene_loc.get("moodboard_paths", [])
+            if mb_paths and Path(mb_paths[0]).exists():
+                scene_moodboard = Path(mb_paths[0]).read_bytes()
 
-        for label, fn in model_attempts:
-            _check_daily_limit()
-            try:
-                _tprint(f"    [{label}] reference for {cid}/{scene_id}")
-                img = fn()
-                out_path.write_bytes(img)
-                exp.log_prompt(
-                    target=f"references/{cid}/{scene_id}.png",
-                    model=GPT_IMAGE_MODEL,
-                    prompt=ref_prompt,
-                    stage="reference",
-                    character=cid, scene=scene_id,
-                )
-                _tprint(f"    \u2713 {label} {cid}/{scene_id} ({len(img)//1024}kB)")
-                return scene_id, cid, str(out_path)
-            except Exception as e:  # noqa: BLE001
-                if _is_daily_limit(e):
-                    _record_daily_limit(e, f"reference/{cid}/{scene_id}")
-                    return None
-                _tprint(f"    ✗ [{label}] {cid}/{scene_id}: {e}")
-
-        _tprint(f"  \u26a0 Reference failed for {cid}/{scene_id} — skipping")
-        return None
+        try:
+            img = _generate_image(
+                prompt=ref_prompt,
+                ref_imgs=[],
+                moodboard=scene_moodboard,
+                size="1344x768",
+                quality="standard",
+                context=f"reference {cid}/{scene_id}",
+            )
+            out_path.write_bytes(img)
+            exp.log_prompt(
+                target=f"references/{cid}/{scene_id}.png",
+                model=GPT_IMAGE_MODEL,
+                prompt=ref_prompt,
+                stage="reference",
+                character=cid, scene=scene_id,
+            )
+            return scene_id, cid, str(out_path)
+        except RuntimeError as e:
+            _tprint(f"  ⚠ Reference failed for {cid}/{scene_id}: {e}")
+            return None
 
     _tprint(f"  Generating {len(work_items)} reference image(s) "
             f"({'parallel' if MAX_WORKERS > 1 else 'serial'}, "
@@ -1195,33 +1364,27 @@ def build_first_frames(exp: Experiment, script: dict, cast: list[dict],
 
         # ── Step 1: Compose the frame ─────────────────────────────────
         composition: bytes | None = None
-        composition_model = GPT_IMAGE_MODEL
+        composition_model = "auto"
 
-        if IMAGE_BACKEND == "google":
-            attempts = [
-                ("imagen3",    lambda: google_imagen(ff_prompt[:1000], "16:9")),
-                ("gpt_image",  lambda: gpt_image(ff_prompt, size="1792x1024", quality="high")),
-                ("nano_banana", lambda: nano_banana(nano_prompt)),
-            ]
-        else:
-            attempts = [
-                ("gpt_image",   lambda: gpt_image(ff_prompt, size="1792x1024", quality="high")),
-                ("gpt_image*",  lambda: gpt_image(_rephrase_prompt(ff_prompt), size="1792x1024", quality="standard")),
-                ("nano_banana", lambda: nano_banana(nano_prompt)),
-            ]
+        # Pull moodboard for this scene if available
+        scene_moodboard: bytes | None = None
+        scene_loc = loc_by_scene.get(scene_id)
+        if scene_loc:
+            mb_paths = scene_loc.get("moodboard_paths", [])
+            if mb_paths and Path(mb_paths[0]).exists():
+                scene_moodboard = Path(mb_paths[0]).read_bytes()
 
-        for label, fn in attempts:
-            _check_daily_limit()
-            try:
-                _tprint(f"    [{label}] frame {scene_id}/{shot_id}")
-                composition = fn()
-                composition_model = label
-                break
-            except Exception as e:  # noqa: BLE001
-                if _is_daily_limit(e):
-                    _record_daily_limit(e, f"first_frame/{scene_id}/{shot_id}")
-                    return None
-                _tprint(f"    ✗ [{label}] {scene_id}/{shot_id}: {e}")
+        try:
+            composition = _generate_image(
+                prompt=ff_prompt,
+                ref_imgs=[],              # refs added in lock step below
+                moodboard=scene_moodboard,
+                size="1792x1024",
+                quality="high",
+                context=f"frame {scene_id}/{shot_id}",
+            )
+        except RuntimeError as e:
+            _tprint(f"  ⚠ All image models failed for {scene_id}/{shot_id}: {e}")
 
         if composition is None:
             _tprint(f"  ⚠ All composition attempts failed for {scene_id}/{shot_id}")
@@ -1242,31 +1405,21 @@ def build_first_frames(exp: Experiment, script: dict, cast: list[dict],
             if rp.exists():
                 ref_imgs.append(rp.read_bytes())
 
-        try:
-            if ref_imgs:
-                # Lock prompt also uses nano_prompt base — must stay <1000 chars.
-                lock_prompt = (
-                    nano_prompt + "\n\nUse FIRST image as composition framing, "
-                    "then character identity refs. Preserve faces exactly."
-                )[:950]
-                final = nano_banana(lock_prompt, reference_images=[composition] + ref_imgs)
-                exp.log_prompt(
-                    target=f"frames/{scene_id}/{shot_id}.png",
-                    model=NANO_BANANA_MODEL,
-                    prompt=lock_prompt,
-                    stage="first_frame_lock",
-                    scene=scene_id, shot=shot_id,
-                    n_reference_images=1 + len(ref_imgs),
+        if ref_imgs:
+            try:
+                final = _generate_image(
+                    prompt=nano_prompt,       # compact prompt for Runway models
+                    ref_imgs=ref_imgs,
+                    moodboard=scene_moodboard,
+                    size="1344x768",
+                    quality="standard",
+                    context=f"frame_lock {scene_id}/{shot_id}",
                 )
-            else:
-                final = composition
-        except Exception as e:  # noqa: BLE001
-            if _is_daily_limit(e):
-                _record_daily_limit(e, f"first_frame_lock/{scene_id}/{shot_id}")
-                final = composition   # use composition without lock
-            else:
+            except RuntimeError as e:
                 _tprint(f"    ⚠ Lock failed for {scene_id}/{shot_id}: {e}  (using composition)")
                 final = composition
+        else:
+            final = composition
 
         out_path.write_bytes(final)
         return scene_id, shot_id, str(out_path)
@@ -1427,38 +1580,16 @@ def build_video(exp: Experiment, script: dict, cast: list[dict],
             duration_seconds=route["segments"][0],
             estimated_cost=route["estimated_cost"],
         )
-        _check_daily_limit()
         try:
-            if VIDEO_BACKEND == "seedance":
-                video_bytes = veo(
-                    vp,
-                    first_frame=ff.read_bytes(),
-                    reference_images=ref_imgs or None,
-                    model=SEEDANCE2_MODEL,
-                    duration_seconds=route["segments"][0],
-                    resolution="720p",
-                    seed=exp.seed + take_idx * 137,
-                )
-            elif VIDEO_BACKEND == "google":
-                video_bytes = google_veo(
-                    vp,
-                    first_frame=ff.read_bytes(),
-                    duration_seconds=route["segments"][0],
-                    resolution="720p",
-                )
-            elif VIDEO_BACKEND == "ltx":
-                video_bytes = ltx_video(
-                    vp,
-                    first_frame=ff.read_bytes(),
-                    duration_seconds=route["segments"][0],
-                    resolution="720p",
-                    seed=exp.seed + take_idx * 137,
-                )
-            else:  # runway (Veo 3.1 via Runway)
-                video_bytes = _render_shot(
-                    route, vp, ff.read_bytes(), ref_imgs,
-                    seed=exp.seed + take_idx * 137,
-                )
+            video_bytes = _generate_video(
+                prompt=vp,
+                first_frame=ff.read_bytes(),
+                ref_imgs=ref_imgs,
+                moodboard=None,          # moodboard handled via ref_imgs in stage 4
+                duration=route["segments"][0],
+                seed=exp.seed + take_idx * 137,
+                context=f"{scene_id}/{shot_id}/take_{take_idx + 1}",
+            )
             take_path.write_bytes(video_bytes)
             _tprint(f"  ✓ take {scene_id}/{shot_id}/{take_idx + 1} "
                     f"({len(video_bytes)//1024}kB)")

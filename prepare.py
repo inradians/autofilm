@@ -1078,6 +1078,53 @@ def nano_banana(prompt: str, reference_images: list[bytes] | None = None) -> byt
 
 
 @api_retry
+def seedance(
+    prompt: str,
+    first_frame: bytes,
+    reference_images: list[bytes] | None = None,
+    duration_seconds: int | None = None,
+    resolution: str | None = None,
+    seed: int | None = None,
+) -> bytes:
+    """Image-to-video via SeedDance 2 (ByteDance model on Runway infrastructure).
+
+    Distinct from veo() — SeedDance is a ByteDance diffusion model, not
+    Google Veo. It natively accepts reference images for identity-consistent
+    generation across shots. 36 credits/sec, up to 15 seconds per clip.
+
+    Reference images are passed with tags ref1/ref2/ref3 so the model can
+    attend to character appearance, location moodboard, etc.
+    """
+    duration = duration_seconds or SHOT_DURATION_SECONDS
+    ratio    = _runway_ratio(resolution=resolution or VEO_RESOLUTION,
+                             model=SEEDANCE2_MODEL)
+    model_meta = next(
+        (m for m in VIDEO_MODELS.values() if m["id"] == SEEDANCE2_MODEL), None
+    )
+    if model_meta:
+        duration = _snap_to_options(duration, model_meta["duration_options"])
+
+    kwargs: dict[str, Any] = {
+        "model":        SEEDANCE2_MODEL,
+        "prompt_text":  prompt,
+        "prompt_image": _data_uri(first_frame),
+        "ratio":        ratio,
+        "duration":     duration,
+    }
+    if seed is not None:
+        kwargs["seed"] = seed
+    if reference_images:
+        kwargs["reference_images"] = [
+            {"tag": f"ref{i+1}", "uri": _data_uri(r)}
+            for i, r in enumerate(reference_images[:3])
+        ]
+
+    task = runway_client().image_to_video.create(**kwargs).wait_for_task_output()
+    if not task.output:
+        raise RuntimeError("SeedDance: no output URL returned")
+    return httpx.get(task.output[0], timeout=300.0).content
+
+
 def veo(
     prompt: str,
     first_frame: bytes,
