@@ -34,6 +34,8 @@ from prepare import (
     Experiment,
     GEMINI_FLASH_MODEL,
     GEN4_IMAGE_MODEL,
+    GOOGLE_IMAGE_MODEL,
+    GOOGLE_VEO_MODEL,
     GPT_IMAGE_MODEL,
     MAX_PLANNED_SHOT_SECONDS,
     MAX_SCENES,
@@ -49,6 +51,8 @@ from prepare import (
     elevenlabs_sfx,
     extract_video_frame,
     ffmpeg,
+    google_imagen,
+    google_veo,
     gpt_image,
     nano_banana,
     plan_shot_durations,
@@ -118,6 +122,19 @@ MUSIC_STYLE = (
 # (typically 10-20 tasks). Set to 1 to disable parallelism entirely
 # (useful for debugging; every print statement appears in order).
 MAX_WORKERS: int = int(os.getenv("MAX_WORKERS", "4"))
+
+# Generation backend selector. Set in .env or shell to switch away from
+# Runway without changing any other code.
+#
+# IMAGE_BACKEND=google   — uses Google Imagen 3 (GOOGLE_AI_API_KEY)
+#                          instead of gpt_image / nano_banana (Runway)
+# VIDEO_BACKEND=google   — uses Google Veo directly (GOOGLE_AI_API_KEY)
+#                          instead of routing Veo through Runway
+#
+# "runway" is the default for both; "google" bypasses Runway entirely for
+# that media type and is not subject to Runway's daily task limits.
+IMAGE_BACKEND: str = os.getenv("IMAGE_BACKEND", "runway")
+VIDEO_BACKEND: str = os.getenv("VIDEO_BACKEND", "runway")
 
 # Thread-safe print — prevents interleaved output from parallel workers.
 _PRINT_LOCK = threading.Lock()
@@ -876,10 +893,19 @@ def build_references(exp: Experiment, script: dict, cast: list[dict],
 
         ref_prompt = _reference_prompt(character, scene, lookbook)
 
-        for label, fn in [
-            ("gpt_image",  lambda: gpt_image(ref_prompt, size="1344x768", quality="standard")),
-            ("nano_banana", lambda: nano_banana(ref_prompt)),
-        ]:
+        if IMAGE_BACKEND == "google":
+            model_attempts = [
+                ("imagen3",    lambda: google_imagen(ref_prompt, "16:9")),
+                ("gpt_image",  lambda: gpt_image(ref_prompt, size="1344x768", quality="standard")),
+                ("nano_banana", lambda: nano_banana(ref_prompt)),
+            ]
+        else:
+            model_attempts = [
+                ("gpt_image",  lambda: gpt_image(ref_prompt, size="1344x768", quality="standard")),
+                ("nano_banana", lambda: nano_banana(ref_prompt)),
+            ]
+
+        for label, fn in model_attempts:
             _check_daily_limit()
             try:
                 _tprint(f"    [{label}] reference for {cid}/{scene_id}")
@@ -1165,11 +1191,21 @@ def build_first_frames(exp: Experiment, script: dict, cast: list[dict],
         # ── Step 1: Compose the frame ─────────────────────────────────
         composition: bytes | None = None
         composition_model = GPT_IMAGE_MODEL
-        for label, fn in [
-            ("gpt_image",   lambda: gpt_image(ff_prompt, size="1792x1024", quality="high")),
-            ("gpt_image*",  lambda: gpt_image(_rephrase_prompt(ff_prompt), size="1792x1024", quality="standard")),
-            ("nano_banana", lambda: nano_banana(nano_prompt)),
-        ]:
+
+        if IMAGE_BACKEND == "google":
+            attempts = [
+                ("imagen3",    lambda: google_imagen(ff_prompt[:1000], "16:9")),
+                ("gpt_image",  lambda: gpt_image(ff_prompt, size="1792x1024", quality="high")),
+                ("nano_banana", lambda: nano_banana(nano_prompt)),
+            ]
+        else:
+            attempts = [
+                ("gpt_image",   lambda: gpt_image(ff_prompt, size="1792x1024", quality="high")),
+                ("gpt_image*",  lambda: gpt_image(_rephrase_prompt(ff_prompt), size="1792x1024", quality="standard")),
+                ("nano_banana", lambda: nano_banana(nano_prompt)),
+            ]
+
+        for label, fn in attempts:
             _check_daily_limit()
             try:
                 _tprint(f"    [{label}] frame {scene_id}/{shot_id}")
@@ -1388,10 +1424,18 @@ def build_video(exp: Experiment, script: dict, cast: list[dict],
         )
         _check_daily_limit()
         try:
-            video_bytes = _render_shot(
-                route, vp, ff.read_bytes(), ref_imgs,
-                seed=exp.seed + take_idx * 137,
-            )
+            if VIDEO_BACKEND == "google":
+                video_bytes = google_veo(
+                    vp,
+                    first_frame=ff.read_bytes(),
+                    duration_seconds=route["segments"][0],
+                    resolution="720p",
+                )
+            else:
+                video_bytes = _render_shot(
+                    route, vp, ff.read_bytes(), ref_imgs,
+                    seed=exp.seed + take_idx * 137,
+                )
             take_path.write_bytes(video_bytes)
             _tprint(f"  ✓ take {scene_id}/{shot_id}/{take_idx + 1} "
                     f"({len(video_bytes)//1024}kB)")

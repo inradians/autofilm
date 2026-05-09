@@ -101,6 +101,114 @@ GEN4_IMAGE_MODEL   = "gen4_image"           # 5 credits @ 720p, 8 credits @ 1080
 GEN4_IMAGE_TURBO   = "gen4_image_turbo"     # 2 credits, references REQUIRED
 GEMINI_FLASH_MODEL = "gemini_2.5_flash"     # 5 credits, any resolution
 
+# ── Google direct backend ────────────────────────────────────────────────────
+# When VIDEO_BACKEND=google or IMAGE_BACKEND=google in produce.py, the
+# pipeline calls these instead of the Runway-proxied equivalents. No daily
+# task limits — billed directly against your GOOGLE_AI_API_KEY quota.
+GOOGLE_VEO_MODEL   = os.getenv("GOOGLE_VIDEO_MODEL", "veo-3.1-generate-preview")
+GOOGLE_IMAGE_MODEL = "imagen-3.0-generate-002"
+
+
+@lru_cache(maxsize=1)
+def _genai_client():
+    """Lazy Google GenAI client using the existing GOOGLE_AI_API_KEY."""
+    try:
+        from google import genai as _genai  # already in deps for the critic
+    except ImportError as exc:
+        raise ImportError(
+            "google-genai not installed. Run: uv add google-genai"
+        ) from exc
+    return _genai.Client(api_key=_require_key("GOOGLE_AI_API_KEY"))
+
+
+def google_imagen(prompt: str, aspect_ratio: str = "16:9") -> bytes:
+    """Generate an image via Google Imagen 3 (AI Studio API).
+
+    Requires GOOGLE_AI_API_KEY. Supported aspect ratios:
+    '1:1', '3:4', '4:3', '9:16', '16:9'.
+    Returns PNG bytes.
+    """
+    from google.genai import types as _gtypes
+    resp = _genai_client().models.generate_images(
+        model=GOOGLE_IMAGE_MODEL,
+        prompt=prompt[:1000],
+        config=_gtypes.GenerateImagesConfig(
+            number_of_images=1,
+            aspect_ratio=aspect_ratio,
+        ),
+    )
+    if not resp.generated_images:
+        raise RuntimeError("Google Imagen 3: no images returned")
+    return resp.generated_images[0].image.image_bytes
+
+
+def google_veo(
+    prompt: str,
+    first_frame: bytes | None = None,
+    duration_seconds: int = 8,
+    resolution: str = "720p",
+) -> bytes:
+    """Generate a video via Google Veo (AI Studio API).
+
+    Requires GOOGLE_AI_API_KEY. No Runway involved — not subject to
+    Runway's daily task limits.
+
+    Veo 3.1 natively generates audio (dialogue, SFX, ambient). The
+    pipeline's veo_prompt already includes 'NO background music' so
+    Stability handles the score and Veo handles everything else.
+
+    Duration is capped at 8 seconds per clip — same as the Runway path.
+    Multi-segment shots are handled upstream by _render_shot_google().
+    Returns MP4 bytes.
+    """
+    import tempfile
+    from google.genai import types as _gtypes
+
+    aspect = "16:9"  # all our shots are 16:9; extend if you add portrait
+
+    config = _gtypes.GenerateVideosConfig(
+        number_of_videos=1,
+        duration_seconds=min(max(int(duration_seconds), 4), 8),
+        aspect_ratio=aspect,
+        enhance_prompt=False,   # we write our own prompts
+    )
+
+    client = _genai_client()
+    kwargs: dict = {"model": GOOGLE_VEO_MODEL, "prompt": prompt, "config": config}
+
+    if first_frame:
+        kwargs["image"] = _gtypes.Image(
+            image_bytes=first_frame, mime_type="image/png"
+        )
+
+    operation = client.models.generate_videos(**kwargs)
+
+    # Poll until done (Veo typically 30–120 seconds)
+    for _ in range(120):        # up to 10 minutes
+        if operation.done:
+            break
+        time.sleep(5)
+        operation = client.operations.get(operation)
+
+    if not operation.done:
+        raise RuntimeError(
+            f"Google Veo ({GOOGLE_VEO_MODEL}) timed out after 10 minutes"
+        )
+
+    vids = operation.response.generated_videos
+    if not vids:
+        raise RuntimeError("Google Veo: no videos returned")
+
+    video = vids[0].video
+    client.files.download(file=video)             # populate video.contents
+
+    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
+        tmp_path = tmp.name
+    video.save(tmp_path)
+    data = Path(tmp_path).read_bytes()
+    Path(tmp_path).unlink(missing_ok=True)
+    return data
+
 # Runway video model IDs. Endpoint: /v1/image_to_video (or /v1/text_to_video,
 # /v1/video_to_video for Aleph). Veo 3.1 is proxied through Runway so the
 # numbers match what direct Google AI charged us pre-migration. The new
