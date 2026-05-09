@@ -577,7 +577,14 @@ def _generate_video(
         ))
 
     # Non-Runway fallbacks — always available regardless of Runway limits.
-    # Both LTX models are tried: Pro first (quality), Fast second (speed/fallback).
+    if os.environ.get("GOOGLE_AI_API_KEY"):
+        attempts.append((
+            "google_veo",
+            lambda: google_veo(prompt, first_frame,
+                               duration_seconds=duration,
+                               resolution="720p"),
+        ))
+    # Both LTX models: Pro first (quality), Fast second (speed/fallback).
     if os.environ.get("LTX_API_KEY"):
         attempts.append((
             "ltx-2-3-pro",
@@ -592,13 +599,6 @@ def _generate_video(
                                duration_seconds=duration,
                                resolution="720p", seed=seed,
                                model=LTX_FAST_MODEL),
-        ))
-    if os.environ.get("GOOGLE_AI_API_KEY"):
-        attempts.append((
-            "google_veo",
-            lambda: google_veo(prompt, first_frame,
-                               duration_seconds=duration,
-                               resolution="720p"),
         ))
 
     last_exc: Exception | None = None
