@@ -108,6 +108,12 @@ GEMINI_FLASH_MODEL = "gemini_2.5_flash"     # 5 credits, any resolution
 GOOGLE_VEO_MODEL   = os.getenv("GOOGLE_VIDEO_MODEL", "veo-3.1-generate-preview")
 GOOGLE_IMAGE_MODEL = "imagen-3.0-generate-002"
 
+# LTX 2.3 — Lightricks API (api.ltx.video)
+# ltx-2-3-pro  → best quality, all endpoints, ~$0.05-0.12/s @ 720p
+# ltx-2-3-fast → rapid iteration, text-to-video + image-to-video only
+LTX_API_BASE    = "https://api.ltx.video"
+LTX_VIDEO_MODEL = os.getenv("LTX_VIDEO_MODEL", "ltx-2-3-pro")
+
 
 @lru_cache(maxsize=1)
 def _genai_client():
@@ -208,6 +214,83 @@ def google_veo(
     data = Path(tmp_path).read_bytes()
     Path(tmp_path).unlink(missing_ok=True)
     return data
+
+def ltx_video(
+    prompt: str,
+    first_frame: bytes | None = None,
+    duration_seconds: int = 8,
+    resolution: str = "720p",
+    seed: int | None = None,
+) -> bytes:
+    """Generate video via LTX 2.3 (Lightricks API, api.ltx.video).
+
+    Uses /v2/image-to-video when first_frame is provided,
+    /v2/text-to-video otherwise. The first frame is sent as a base64
+    data URI (supports up to ~5 MB raw; typical PNG frames are <2 MB).
+
+    No Runway involved. Requires LTX_API_KEY from console.ltx.video.
+    Returns MP4 bytes.
+    """
+    api_key = _require_key("LTX_API_KEY")
+    auth    = {"Authorization": f"Bearer {api_key}"}
+
+    res_map = {"720p": "1280x720", "1080p": "1920x1080", "480p": "848x480"}
+    res_str = res_map.get(resolution, "1280x720")
+
+    body: dict = {
+        "prompt":     prompt,
+        "model":      LTX_VIDEO_MODEL,
+        "duration":   min(max(int(duration_seconds), 1), 20),
+        "resolution": res_str,
+    }
+    if seed is not None:
+        body["seed"] = seed
+
+    if first_frame:
+        import base64 as _b64
+        b64 = _b64.b64encode(first_frame).decode()
+        body["image_uri"] = f"data:image/png;base64,{b64}"
+        endpoint = "image-to-video"
+    else:
+        endpoint = "text-to-video"
+
+    # Submit async job (/v2 recommended — avoids long-connection timeouts)
+    submit = httpx.post(
+        f"{LTX_API_BASE}/v2/{endpoint}",
+        headers={**auth, "Content-Type": "application/json"},
+        json=body,
+        timeout=30.0,
+    )
+    if not submit.is_success:
+        try:
+            detail = submit.json()
+        except Exception:
+            detail = submit.text[:400]
+        raise RuntimeError(f"LTX submit {submit.status_code}: {detail}")
+
+    job_id: str = submit.json()["id"]
+
+    # Poll every 5 s as the docs recommend, up to 10 minutes
+    for _ in range(120):
+        time.sleep(5)
+        poll = httpx.get(
+            f"{LTX_API_BASE}/v2/{endpoint}/{job_id}",
+            headers=auth,
+            timeout=30.0,
+        )
+        poll.raise_for_status()
+        data = poll.json()
+        if data["status"] == "completed":
+            video_url: str = data["result"]["video_url"]
+            return httpx.get(video_url, timeout=120.0).content
+        if data["status"] == "failed":
+            err = data.get("error", {})
+            raise RuntimeError(f"LTX job failed: {err.get('message', err)}")
+        # "pending" or "processing" — keep polling
+
+    raise RuntimeError(f"LTX job {job_id} timed out after 10 minutes")
+
+
 
 # Runway video model IDs. Endpoint: /v1/image_to_video (or /v1/text_to_video,
 # /v1/video_to_video for Aleph). Veo 3.1 is proxied through Runway so the

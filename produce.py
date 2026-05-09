@@ -37,6 +37,8 @@ from prepare import (
     GOOGLE_IMAGE_MODEL,
     GOOGLE_VEO_MODEL,
     GPT_IMAGE_MODEL,
+    LTX_API_BASE,
+    LTX_VIDEO_MODEL,
     MAX_PLANNED_SHOT_SECONDS,
     MAX_SCENES,
     NANO_BANANA_MODEL,
@@ -54,6 +56,7 @@ from prepare import (
     google_imagen,
     google_veo,
     gpt_image,
+    ltx_video,
     nano_banana,
     plan_shot_durations,
     route_shot,
@@ -128,11 +131,13 @@ MAX_WORKERS: int = int(os.getenv("MAX_WORKERS", "4"))
 #
 # IMAGE_BACKEND=google   — uses Google Imagen 3 (GOOGLE_AI_API_KEY)
 #                          instead of gpt_image / nano_banana (Runway)
-# VIDEO_BACKEND=google   — uses Google Veo directly (GOOGLE_AI_API_KEY)
-#                          instead of routing Veo through Runway
+# VIDEO_BACKEND=google   — uses Google Veo 3.1 (GOOGLE_AI_API_KEY)
+# VIDEO_BACKEND=ltx      — uses LTX 2.3 (LTX_API_KEY, console.ltx.video)
+#                          open-source DiT model, per-second billing,
+#                          no daily hard cap, native audio
 #
-# "runway" is the default for both; "google" bypasses Runway entirely for
-# that media type and is not subject to Runway's daily task limits.
+# "runway" is the default for both. Non-runway backends are not subject
+# to Runway's daily task limits.
 IMAGE_BACKEND: str = os.getenv("IMAGE_BACKEND", "runway")
 VIDEO_BACKEND: str = os.getenv("VIDEO_BACKEND", "runway")
 
@@ -1430,6 +1435,14 @@ def build_video(exp: Experiment, script: dict, cast: list[dict],
                     first_frame=ff.read_bytes(),
                     duration_seconds=route["segments"][0],
                     resolution="720p",
+                )
+            elif VIDEO_BACKEND == "ltx":
+                video_bytes = ltx_video(
+                    vp,
+                    first_frame=ff.read_bytes(),
+                    duration_seconds=route["segments"][0],
+                    resolution="720p",
+                    seed=exp.seed + take_idx * 137,
                 )
             else:
                 video_bytes = _render_shot(
