@@ -1866,86 +1866,21 @@ def stable_image(
 # Available since Sept 2025; same auth as other Runway endpoints.
 RUNWAY_TTS_MODEL = "eleven_multilingual_v2"
 
-# A small set of preset voice IDs for default narration. Override per-call
-# by passing voice_id explicitly. These are commonly used ElevenLabs voices.
+# Runway TTS preset names. Runway's text_to_speech API accepts a fixed
+# enum of preset IDs — sending an ElevenLabs voice hash (or anything
+# else) returns a 400 with the full list. The presets below are picked
+# from Runway's catalog to give the pipeline 5 distinct narrator vibes.
+# Override per-call by passing voice_id explicitly. To see the full
+# list of currently-supported presets, send any wrong value to /v1/
+# text_to_speech and Runway returns the enum in the error body.
 RUNWAY_VOICE_IDS: dict[str, str] = {
-    "rachel":    "21m00Tcm4TlvDq8ikWAM",   # warm female narrator
-    "george":    "JBFqnCBsd6RMkjVDRZzb",   # mature male narrator
-    "antoni":    "ErXwobaYiN019PkySvjV",   # clear male narrator
-    "bella":     "EXAVITQu4vr4xnSDxMaL",   # soft female
-    "sam":       "yoZ06aMxZJJ28mfd3POQ",   # neutral male
+    "rachel":    "Rachel",   # warm female narrator
+    "george":    "Bernard",  # mature male narrator
+    "antoni":    "Mark",     # clear male narrator
+    "bella":     "Maya",     # soft female
+    "sam":       "Tom",      # neutral male
 }
 DEFAULT_NARRATION_VOICE = "rachel"
-
-
-@api_retry
-def runway_tts(
-    text: str,
-    voice_id: str | None = None,
-    model: str = RUNWAY_TTS_MODEL,
-) -> bytes:
-    """Generate narration audio via ElevenLabs Multilingual v2 (through Runway).
-
-    Used for voice-over narration tracks layered over scene audio. The
-    pipeline calls this for each `narration` screenplay element.
-
-    voice_id: ElevenLabs voice ID. If unset, picks the rachel preset.
-    Returns MP3 bytes.
-
-    The Runway SDK exposes this as `text_to_speech.create(...)`. If the
-    SDK shape differs in your version, fall back to the direct ElevenLabs
-    API by setting ELEVENLABS_API_KEY (handled below).
-    """
-    voice = voice_id or RUNWAY_VOICE_IDS[DEFAULT_NARRATION_VOICE]
-
-    # Try Runway SDK path first.
-    try:
-        client = runway_client()
-        if hasattr(client, "text_to_speech"):
-            task = client.text_to_speech.create(
-                model=model,
-                text=text,
-                voice_id=voice,
-            ).wait_for_task_output()
-            if task.output:
-                return httpx.get(task.output[0], timeout=120.0).content
-    except Exception:
-        # Fall through to direct ElevenLabs path
-        pass
-
-    # Direct ElevenLabs API fallback (requires ELEVENLABS_API_KEY).
-    el_key = os.environ.get("ELEVENLABS_API_KEY")
-    if not el_key:
-        raise RuntimeError(
-            "Runway SDK has no text_to_speech method and no ELEVENLABS_API_KEY "
-            "is set. Either upgrade the runwayml package or set ELEVENLABS_API_KEY."
-        )
-    resp = httpx.post(
-        f"https://api.elevenlabs.io/v1/text-to-speech/{voice}",
-        headers={
-            "xi-api-key":   el_key,
-            "Content-Type": "application/json",
-            "Accept":       "audio/mpeg",
-        },
-        json={
-            "text":     text[:5000],
-            "model_id": model,
-            "voice_settings": {
-                "stability":        0.5,
-                "similarity_boost": 0.75,
-                "style":            0.2,
-                "use_speaker_boost": True,
-            },
-        },
-        timeout=120.0,
-    )
-    if not resp.is_success:
-        try:
-            detail = resp.json()
-        except Exception:
-            detail = resp.text[:400]
-        raise RuntimeError(f"ElevenLabs TTS {resp.status_code}: {detail}")
-    return resp.content
 
 
 # FLUX model strings.
@@ -2104,25 +2039,85 @@ def _fit_audio_to_duration(audio_bytes: bytes, target_seconds: float) -> bytes:
 
 
 @api_retry
-def runway_tts(text: str, voice_id: str = "Maya") -> bytes:
-    """ElevenLabs text-to-speech via Runway's /v1/text_to_speech endpoint.
+def runway_tts(text: str, voice_id: str = "Rachel") -> bytes:
+    """Text-to-speech narration via Runway (or direct ElevenLabs fallback).
 
-    NEW capability — useful for narrator/voiceover that the old pipeline
-    couldn't generate (Veo's native audio only covers in-frame dialogue).
-    1 credit per 50 chars (~$0.01). produce.py doesn't call this by
-    default; expose it to the agent via the import surface.
+    Runway's /v1/text_to_speech accepts a fixed enum of preset IDs (e.g.
+    "Maya", "Bernard", "Rachel"). Sending anything else returns 400 with
+    the full enum in the error body.
+
+    Used by produce.py for voice-over narration layered over each scene.
+    1 credit per 50 chars (~$0.01 via Runway, similar via ElevenLabs).
+
+    Falls back to direct ElevenLabs API when:
+      - the Runway SDK doesn't expose .text_to_speech (older version), or
+      - the Runway call fails for transport reasons (not validation).
     """
-    task = runway_client().text_to_speech.create(
-        model="eleven_multilingual_v2",
-        prompt_text=text,
-        # Note: nested dict keys go through verbatim — the SDK only
-        # auto-converts top-level kwargs from snake_case to camelCase.
-        # The API expects `presetId`, not `preset_id`.
-        voice={"type": "runway-preset", "presetId": voice_id},
-    ).wait_for_task_output()
-    if not task.output:
-        raise RuntimeError("Runway TTS: no output URL returned")
-    return httpx.get(task.output[0], timeout=120.0).content
+    # ── Runway preset path ──────────────────────────────────────────────
+    try:
+        client = runway_client()
+        if hasattr(client, "text_to_speech"):
+            task = client.text_to_speech.create(
+                model="eleven_multilingual_v2",
+                prompt_text=text,
+                # Nested dict keys go through verbatim — the SDK only
+                # auto-converts top-level kwargs from snake_case to
+                # camelCase. The API expects `presetId`, not `preset_id`.
+                voice={"type": "runway-preset", "presetId": voice_id},
+            ).wait_for_task_output()
+            if task.output:
+                return httpx.get(task.output[0], timeout=120.0).content
+            raise RuntimeError("Runway TTS: no output URL returned")
+    except Exception as e:                                  # noqa: BLE001
+        # If we got a validation error (wrong preset), don't paper over
+        # it with a fallback — the caller has a bug.
+        if "presetId" in str(e) or "Invalid option" in str(e):
+            raise
+        # Otherwise (transport / SDK shape / 5xx), try ElevenLabs direct.
+        last_runway_error = e
+
+    # ── ElevenLabs direct fallback (requires ELEVENLABS_API_KEY) ────────
+    el_key = os.environ.get("ELEVENLABS_API_KEY", "").strip()
+    if not el_key:
+        raise RuntimeError(
+            f"Runway TTS failed and no ELEVENLABS_API_KEY for fallback: "
+            f"{last_runway_error}"
+        )
+    # ElevenLabs takes voice IDs (hashes), not preset names; map common
+    # presets that Runway exposes back to known ElevenLabs voice hashes
+    # so the fallback path still produces sensible-sounding narration.
+    el_voice_map = {
+        "Rachel":   "21m00Tcm4TlvDq8ikWAM",
+        "Bernard":  "JBFqnCBsd6RMkjVDRZzb",
+        "Mark":     "ErXwobaYiN019PkySvjV",
+        "Maya":     "EXAVITQu4vr4xnSDxMaL",
+        "Tom":      "yoZ06aMxZJJ28mfd3POQ",
+    }
+    el_voice = el_voice_map.get(voice_id, el_voice_map["Rachel"])
+    resp = httpx.post(
+        f"https://api.elevenlabs.io/v1/text-to-speech/{el_voice}",
+        headers={
+            "xi-api-key":    el_key,
+            "Content-Type":  "application/json",
+            "Accept":        "audio/mpeg",
+        },
+        json={
+            "text":     text[:5000],
+            "model_id": "eleven_multilingual_v2",
+            "voice_settings": {
+                "stability":         0.5,
+                "similarity_boost":  0.75,
+                "style":             0.2,
+                "use_speaker_boost": True,
+            },
+        },
+        timeout=120.0,
+    )
+    if not resp.is_success:
+        try:    detail = resp.json()
+        except Exception:    detail = resp.text[:400]
+        raise RuntimeError(f"ElevenLabs TTS {resp.status_code}: {detail}")
+    return resp.content
 
 
 def ffmpeg(args: list[str]) -> None:

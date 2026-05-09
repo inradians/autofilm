@@ -2351,6 +2351,27 @@ def compile_final(exp: Experiment, script: dict, storyboard: dict,
             )
         return fn(audio_clip)
 
+    def _crossfadein(clip, duration: float):
+        """Apply a crossfade-in transition.
+
+        v1: clip.crossfadein(duration)
+        v2: clip.with_effects([vfx.CrossFadeIn(duration=...)])
+        If neither path works (some 2.x intermediate builds), return
+        the clip unchanged — losing only the first-scene fade-in is
+        much better than crashing the whole compile.
+        """
+        fn = getattr(clip, "crossfadein", None)
+        if fn is not None:
+            try:
+                return fn(duration)
+            except Exception:                                 # noqa: BLE001
+                pass
+        try:
+            from moviepy.video.fx.CrossFadeIn import CrossFadeIn  # type: ignore
+            return clip.with_effects([CrossFadeIn(duration=duration)])
+        except Exception:                                     # noqa: BLE001
+            return clip
+
     decision_by_shot = {(d["scene_id"], d["shot_id"]): d for d in edl["decisions"]}
     scene_order = [s["id"] for s in script["scenes"]]
     scene_by_id = {s["id"]: s for s in script["scenes"]}
@@ -2480,8 +2501,7 @@ def compile_final(exp: Experiment, script: dict, storyboard: dict,
         if layers:
             scene_video = _set_audio(scene_video, CompositeAudioClip(layers))
 
-        scene_clips.append(scene_video.crossfadein(0.5) if _moviepy_v1
-                           else scene_video.with_effects([]))
+        scene_clips.append(_crossfadein(scene_video, 0.5))
 
     if not scene_clips:
         raise RuntimeError("No scene clips assembled.")
