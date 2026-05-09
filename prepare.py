@@ -1166,11 +1166,10 @@ def openai_image(
     size: str = "1536x1024",
     quality: str = "medium",
 ) -> bytes:
-    """GPT Image 1 via OpenAI API directly (not through Runway).
+    """GPT Image 2 via OpenAI API directly (not through Runway).
 
     Uses a separate OPENAI_API_KEY and billing account — independent of
-    Runway's daily task limits. Falls back to this when gpt_image (Runway)
-    hits its quota.
+    Runway's daily task limits.
 
     Sizes:  '1024x1024' (square), '1536x1024' (landscape), '1024x1536' (portrait)
     Quality: 'low' | 'medium' | 'high' | 'auto'
@@ -1186,7 +1185,7 @@ def openai_image(
             "Content-Type":  "application/json",
         },
         json={
-            "model":   "gpt-image-1",
+            "model":   "gpt-image-2",
             "prompt":  prompt[:32000],  # model supports long prompts
             "n":       1,
             "size":    size,
