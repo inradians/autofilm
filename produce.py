@@ -42,6 +42,7 @@ from prepare import (
     MAX_PLANNED_SHOT_SECONDS,
     MAX_SCENES,
     NANO_BANANA_MODEL,
+    SEEDANCE2_MODEL,
     SHOT_DURATION_SECONDS,
     TAKES_PER_SHOT,
     VEO_MODEL_LITE,
@@ -127,19 +128,18 @@ MUSIC_STYLE = (
 MAX_WORKERS: int = int(os.getenv("MAX_WORKERS", "4"))
 
 # Generation backend selector. Set in .env or shell to switch away from
-# Runway without changing any other code.
+# the default without changing any other code.
 #
-# IMAGE_BACKEND=google   — uses Google Imagen 3 (GOOGLE_AI_API_KEY)
-#                          instead of gpt_image / nano_banana (Runway)
-# VIDEO_BACKEND=google   — uses Google Veo 3.1 (GOOGLE_AI_API_KEY)
-# VIDEO_BACKEND=ltx      — uses LTX 2.3 (LTX_API_KEY, console.ltx.video)
-#                          open-source DiT model, per-second billing,
-#                          no daily hard cap, native audio
+# VIDEO_BACKEND=seedance — Runway SeedDance 2 (default)
+#                          36 credits/sec, identity-consistent, up to 15s,
+#                          native reference images, RUNWAYML_API_SECRET
+# VIDEO_BACKEND=runway   — Runway Veo 3.1 (previous default)
+# VIDEO_BACKEND=google   — Google Veo 3.1 direct (GOOGLE_AI_API_KEY)
+# VIDEO_BACKEND=ltx      — LTX 2.3 (LTX_API_KEY, console.ltx.video)
 #
-# "runway" is the default for both. Non-runway backends are not subject
-# to Runway's daily task limits.
+# IMAGE_BACKEND=google   — Google Imagen 3 instead of gpt_image / nano_banana
 IMAGE_BACKEND: str = os.getenv("IMAGE_BACKEND", "runway")
-VIDEO_BACKEND: str = os.getenv("VIDEO_BACKEND", "runway")
+VIDEO_BACKEND: str = os.getenv("VIDEO_BACKEND", "seedance")
 
 # Thread-safe print — prevents interleaved output from parallel workers.
 _PRINT_LOCK = threading.Lock()
@@ -1429,7 +1429,17 @@ def build_video(exp: Experiment, script: dict, cast: list[dict],
         )
         _check_daily_limit()
         try:
-            if VIDEO_BACKEND == "google":
+            if VIDEO_BACKEND == "seedance":
+                video_bytes = veo(
+                    vp,
+                    first_frame=ff.read_bytes(),
+                    reference_images=ref_imgs or None,
+                    model=SEEDANCE2_MODEL,
+                    duration_seconds=route["segments"][0],
+                    resolution="720p",
+                    seed=exp.seed + take_idx * 137,
+                )
+            elif VIDEO_BACKEND == "google":
                 video_bytes = google_veo(
                     vp,
                     first_frame=ff.read_bytes(),
@@ -1444,7 +1454,7 @@ def build_video(exp: Experiment, script: dict, cast: list[dict],
                     resolution="720p",
                     seed=exp.seed + take_idx * 137,
                 )
-            else:
+            else:  # runway (Veo 3.1 via Runway)
                 video_bytes = _render_shot(
                     route, vp, ff.read_bytes(), ref_imgs,
                     seed=exp.seed + take_idx * 137,
