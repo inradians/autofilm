@@ -1449,7 +1449,10 @@ def build_video(exp: Experiment, script: dict, cast: list[dict],
         try:
             video_bytes = _render_shot(
                 route, vp, ff.read_bytes(), ref_imgs,
-                seed=1000 + take_idx * 137,
+                # Seed is stable for the lifetime of this experiment so a
+                # re-run that needs to regenerate a missing take gets the
+                # same result as the original attempt would have.
+                seed=exp.seed + take_idx * 137,
             )
             take_path.write_bytes(video_bytes)
             _tprint(f"  ✓ take {scene_id}/{shot_id}/{take_idx + 1} "
@@ -1927,8 +1930,23 @@ def run(exp: Experiment) -> Path:
 
 
 if __name__ == "__main__":
-    exp = Experiment.new()
-    print(f"=== {exp.exp_id} ===")
+    exp = Experiment.new_or_resume()
+
+    already_has = [
+        art for art in ("script.json", "cast.json", "locations.json",
+                        "lookbook.json", "storyboard.json", "final.mp4")
+        if exp.has(art)
+    ]
+    if already_has:
+        print(f"=== Resuming {exp.book_slug}/{exp.exp_id} "
+              f"(seed={exp.seed}) ===")
+        print(f"  Already complete: {', '.join(already_has)}")
+        print(f"  Missing artifacts will be generated now.")
+        print(f"  (Set FORCE_NEW=1 to start a fresh experiment instead.)")
+    else:
+        print(f"=== New experiment: {exp.book_slug}/{exp.exp_id} "
+              f"(seed={exp.seed}) ===")
+
     final = run(exp)
     print(f"\nFinal film: {final}")
 

@@ -451,7 +451,60 @@ class Experiment:
         # surface it without re-deriving from BOOK_PDF_PATH (which may
         # have changed by the time we look).
         (root / "book.txt").write_text(book_slug)
+        # Assign a random seed. Stored so every resume of this experiment
+        # uses the same seed, making generation deterministic across runs.
+        import random as _random
+        seed = int(os.environ.get("SEED", "")) if os.environ.get("SEED", "").isdigit() \
+               else _random.randint(100_000, 999_999)
+        (root / "seed.txt").write_text(str(seed))
         return cls(exp_id=exp_id, root=root)
+
+    @classmethod
+    def new_or_resume(cls, book_slug: str | None = None) -> "Experiment":
+        """Return the experiment to run — resuming the latest incomplete one
+        or creating a fresh one when appropriate.
+
+        Resume logic:
+          - If the latest experiment for this book has no ``final.mp4``, it
+            is considered incomplete and is resumed. All already-generated
+            artifacts (frames, clips, audio, references, moodboards) are
+            kept intact; only missing files are generated.
+          - If the latest experiment is complete (has ``final.mp4``), a new
+            experiment is created so the completed run isn't overwritten.
+          - ``FORCE_NEW=1`` always creates a new experiment, ignoring any
+            incomplete prior run. Useful when you've changed ``produce.py``
+            significantly and want a clean slate.
+          - ``SEED=<int>`` pins the seed for the new experiment. On resume
+            the stored seed is always used, regardless of this variable.
+
+        The experiment's seed is stored in ``seed.txt`` at creation and read
+        back on every resume so video takes are reproducible across runs.
+        """
+        if book_slug is None:
+            book_slug = _book_slug()
+
+        force_new = os.environ.get("FORCE_NEW", "").lower() in ("1", "true", "yes")
+
+        if not force_new:
+            book_dir = EXPERIMENTS_DIR / book_slug
+            if book_dir.exists():
+                candidates = sorted(
+                    p for p in book_dir.iterdir()
+                    if p.is_dir() and p.name.startswith("exp_")
+                )
+                if candidates:
+                    latest = candidates[-1]
+                    if not (latest / "final.mp4").exists():
+                        exp = cls(exp_id=latest.name, root=latest)
+                        # Ensure seed.txt exists (older experiments may lack it).
+                        if not (latest / "seed.txt").exists():
+                            import random as _random
+                            (latest / "seed.txt").write_text(
+                                str(_random.randint(100_000, 999_999))
+                            )
+                        return exp
+
+        return cls.new(book_slug)
 
     @classmethod
     def load(cls, exp_id: str) -> "Experiment":
@@ -513,6 +566,29 @@ class Experiment:
         field."""
         f = self.root / "book.txt"
         return f.read_text().strip() if f.exists() else "unknown_book"
+
+    @property
+    def seed(self) -> int:
+        """The integer seed for this experiment's randomized API calls.
+
+        Stored in ``seed.txt`` at creation and constant for the lifetime
+        of the experiment. All video-generation seeds derive from this
+        (``exp.seed + take_idx * 137``) so re-running with the same
+        experiment produces the same takes for slots that weren't cached.
+        Returns 1000 as a safe fallback for very old experiments that
+        pre-date seed tracking.
+        """
+        f = self.root / "seed.txt"
+        try:
+            return int(f.read_text().strip())
+        except Exception:
+            return 1000
+
+    @property
+    def is_complete(self) -> bool:
+        """True if final.mp4 exists — used by new_or_resume() to decide
+        whether to resume or start fresh."""
+        return (self.root / "final.mp4").exists()
 
     # --- Artifact I/O ---
     def write_json(self, name: str, data: Any) -> Path:
