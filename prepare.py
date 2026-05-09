@@ -332,7 +332,9 @@ def google_veo(
         "duration_seconds": dur,
         "aspect_ratio":     "16:9",
         "resolution":       res,
-        "enhance_prompt":   False,
+        # NOTE: enhance_prompt is not supported by veo-3.1-generate-preview
+        # (Google returns 400 'enhancePrompt isn't supported by this model').
+        # We leave it unset so the model uses its default behavior.
     }
     if reference_images:
         config_kwargs["reference_images"] = [
