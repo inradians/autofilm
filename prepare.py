@@ -920,6 +920,208 @@ class Experiment:
         latest = max(all_exps, key=lambda p: p.stat().st_mtime)
         return cls(exp_id=latest.name, root=latest)
 
+    @classmethod
+    def new_iteration(
+        cls,
+        prev_exp: "Experiment",
+        carryover: "dict[str, Any] | None" = None,
+    ) -> "Experiment":
+        """Create a new experiment that selectively inherits from prev_exp.
+
+        Used by run_loop.py to chain experiments: each iteration starts
+        fresh BUT copies forward all artifacts the critic didn't flag for
+        regeneration. produce.py's stage-level ``if exp.has(...)`` checks
+        skip those carried-forward files, so only the invalidated artifacts
+        are regenerated.
+
+        ``carryover`` schema (all fields optional, default = inherit
+        everything that exists):
+          {
+            "regen_script":      bool,   # parse + screenplay format
+            "regen_cast":        bool,   # casting + locations + moodboards
+            "regen_lookbook":    bool,   # style frame + grade + style keywords
+            "regen_references":  list[[scene_id, char_id]] | "all",
+            "regen_storyboard":  bool,
+            "regen_music":       list[scene_id] | "all",
+            "regen_narration":   list[scene_id] | "all",
+            "regen_frames":      list[[scene_id, shot_id]] | "all",
+            "regen_clips":       list[[scene_id, shot_id]] | "all",
+            "regen_edl":         bool,
+          }
+
+        Cascade rules: ``regen_lookbook`` forces references / frames /
+        clips to "all" (the look fundamentally changed). ``regen_script``
+        forces full pipeline regen.
+        """
+        import shutil
+        carryover = dict(carryover or {})
+
+        # Cascade: high-level invalidations force lower-level ones.
+        if carryover.get("regen_script"):
+            for k in ("regen_cast", "regen_lookbook", "regen_storyboard"):
+                carryover[k] = True
+            carryover["regen_references"] = "all"
+            carryover["regen_music"]      = "all"
+            carryover["regen_narration"]  = "all"
+            carryover["regen_frames"]     = "all"
+            carryover["regen_clips"]      = "all"
+            carryover["regen_edl"]        = True
+        if carryover.get("regen_lookbook"):
+            carryover["regen_references"] = "all"
+            carryover["regen_frames"]     = "all"
+            carryover["regen_clips"]      = "all"
+
+        # Create new exp dir under the same book.
+        book_slug = prev_exp.book_slug
+        book_dir = EXPERIMENTS_DIR / book_slug
+        existing = sorted(
+            p for p in book_dir.iterdir()
+            if p.is_dir() and p.name.startswith("exp_")
+        )
+        n = len(existing) + 1
+        exp_id = f"exp_{n:03d}"
+        root = book_dir / exp_id
+        root.mkdir()
+
+        produce_src = PROJECT_ROOT / "produce.py"
+        if produce_src.exists():
+            (root / "produce.py").write_text(produce_src.read_text())
+        (root / "book.txt").write_text(book_slug)
+        # Inherit seed for reproducibility — same characters, same camera
+        # luck, only invalidated stages get fresh API calls.
+        (root / "seed.txt").write_text(str(prev_exp.seed))
+        (root / "parent_exp.txt").write_text(prev_exp.exp_id)
+        (root / "carryover.json").write_text(
+            json.dumps(carryover, indent=2, ensure_ascii=False)
+        )
+
+        # Top-level files we never copy forward (rebuilt by next exp).
+        skip_files: set[str] = {
+            "produce.py", "book.txt", "seed.txt", "parent_exp.txt",
+            "carryover.json", "final.mp4", "final_pregrade.mp4",
+            "metric.json", "critique.md", "bible.pdf",
+            "production_bible.json", "prompts.json",
+        }
+
+        def _copy_one(src: Path, dst: Path) -> None:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+
+        # Copy individual top-level JSON files unless flagged for regen.
+        flag_for_file = {
+            "script.json":           "regen_script",
+            "cast.json":             "regen_cast",
+            "locations.json":        "regen_cast",
+            "lookbook.json":         "regen_lookbook",
+            "storyboard.json":       "regen_storyboard",
+            "edl.json":              "regen_edl",
+            "frames_manifest.json":  "regen_frames",  # any per-shot regen invalidates the manifest
+        }
+        for src in prev_exp.root.iterdir():
+            if not src.is_file() or src.name in skip_files:
+                continue
+            flag = flag_for_file.get(src.name)
+            if flag and carryover.get(flag):
+                continue
+            _copy_one(src, root / src.name)
+
+        def _copy_filtered_dir(
+            dir_name: str,
+            regen_spec: Any,
+            key_pattern,
+        ) -> None:
+            """Copy dir_name from prev_exp to new exp, skipping any file
+            whose key (via key_pattern) is in regen_spec. If regen_spec is
+            'all', skip the whole dir (nothing carried forward)."""
+            src_dir = prev_exp.root / dir_name
+            if not src_dir.exists():
+                return
+            if regen_spec == "all":
+                return
+            regen_set: set[tuple] = (
+                {tuple(x) for x in regen_spec}
+                if isinstance(regen_spec, list)
+                else set()
+            )
+            for src in src_dir.rglob("*"):
+                if not src.is_file():
+                    continue
+                rel = src.relative_to(prev_exp.root)
+                key = key_pattern(rel)
+                if key and key in regen_set:
+                    continue
+                _copy_one(src, root / rel)
+
+        # Lookbook subdir (style_frame.png) — all-or-nothing.
+        if not carryover.get("regen_lookbook"):
+            lb_src = prev_exp.root / "lookbook"
+            if lb_src.exists():
+                shutil.copytree(lb_src, root / "lookbook", dirs_exist_ok=True)
+
+        # Location moodboards — bound to cast/locations stage.
+        if not carryover.get("regen_cast"):
+            mb_src = prev_exp.root / "location_moodboards"
+            if mb_src.exists():
+                shutil.copytree(mb_src, root / "location_moodboards", dirs_exist_ok=True)
+
+        # References: layout = references/{char_id}/{scene_id}.png
+        # Carryover key = (scene_id, char_id) per the schema.
+        _copy_filtered_dir(
+            "references",
+            carryover.get("regen_references"),
+            lambda rel: (rel.parts[1].split(".")[0], rel.parts[0])
+                        if len(rel.parts) >= 2 else None,
+        )
+
+        # Music: layout = music/{scene_id}.wav
+        _copy_filtered_dir(
+            "music",
+            carryover.get("regen_music"),
+            lambda rel: (rel.stem,)
+                        if rel.suffix in {".wav", ".mp3"} else None,
+        )
+
+        # Narration: layout = narration/{scene_id}.mp3
+        _copy_filtered_dir(
+            "narration",
+            carryover.get("regen_narration"),
+            lambda rel: (rel.stem,)
+                        if rel.suffix in {".mp3", ".wav"} else None,
+        )
+
+        # Frames: layout = frames/{scene_id}/{shot_id}.png
+        _copy_filtered_dir(
+            "frames",
+            carryover.get("regen_frames"),
+            lambda rel: (rel.parts[0], rel.parts[1].split(".")[0])
+                        if len(rel.parts) >= 2 else None,
+        )
+
+        # Clips: layout = clips/{scene_id}/{shot_id}/take_N.mp4
+        _copy_filtered_dir(
+            "clips",
+            carryover.get("regen_clips"),
+            lambda rel: (rel.parts[0], rel.parts[1])
+                        if len(rel.parts) >= 2 else None,
+        )
+
+        # SFX (ambient): bound to clip-level regen. If clips is 'all', skip.
+        if carryover.get("regen_clips") != "all":
+            sfx_src = prev_exp.root / "sfx"
+            if sfx_src.exists():
+                shutil.copytree(sfx_src, root / "sfx", dirs_exist_ok=True)
+
+        return cls(exp_id=exp_id, root=root)
+
+    @property
+    def parent_exp_id(self) -> "str | None":
+        """The parent experiment id if this exp inherited from one, else None.
+
+        Set by ``new_iteration()`` when chaining experiments.
+        """
+        f = self.root / "parent_exp.txt"
+        return f.read_text().strip() if f.exists() else None
+
     @property
     def book_slug(self) -> str:
         """Read the book slug stamped at experiment creation. Returns

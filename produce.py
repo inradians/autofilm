@@ -2340,7 +2340,18 @@ if __name__ == "__main__":
     final = run(exp)
     print(f"\nFinal film: {final}")
 
-    # Auto-generate the production bible. Includes whatever has been
+    # Auto-generate the machine-readable production bible JSON. This is
+    # what run_loop.py reads to plan the next iteration's carryover.
+    # Always written — even before the critic runs — so partial data is
+    # available if the run is inspected mid-loop.
+    try:
+        from production_bible import build_production_bible_json
+        pb_path = build_production_bible_json(exp)
+        print(f"Production bible JSON: {pb_path}")
+    except Exception as e:  # noqa: BLE001
+        print(f"production_bible.json failed (non-fatal): {e}")
+
+    # Auto-generate the production bible PDF. Includes whatever has been
     # produced so far — if metric.json doesn't exist yet, the bible just
     # omits the critique section. After running evaluate.py, run
     # `python bible.py <exp_id>` to refresh the bible with critique data.
@@ -2348,9 +2359,9 @@ if __name__ == "__main__":
         from bible import build_bible
         bible_path = build_bible(exp)
         size_mb = bible_path.stat().st_size / 1_048_576
-        print(f"Production bible: {bible_path}  ({size_mb:.1f} MB)")
+        print(f"Production bible PDF: {bible_path}  ({size_mb:.1f} MB)")
     except Exception as e:  # noqa: BLE001
-        print(f"Bible generation failed (non-fatal): {e}")
+        print(f"Bible PDF generation failed (non-fatal): {e}")
 
-    print(f"Next: `python evaluate.py {exp.exp_id}` to score it, "
-          f"then `python bible.py {exp.exp_id}` to refresh the bible.")
+    print(f"\nNext: `python evaluate.py {exp.exp_id}` to score it,")
+    print(f"  or `python run_loop.py --resume --iterations 3` to keep iterating.")

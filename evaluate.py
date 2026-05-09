@@ -37,6 +37,22 @@ def _score(exp_id: str) -> tuple[str, dict]:
         print(f"    refreshed bible: {bible_path.name}  ({size_mb:.1f} MB)")
     except Exception as e:  # noqa: BLE001
         print(f"    bible refresh failed (non-fatal): {e}")
+    # Refresh the machine-readable production bible JSON so run_loop.py
+    # can read up-to-date metric data when planning the next iteration.
+    try:
+        from production_bible import build_production_bible_json
+        pb_path = build_production_bible_json(exp)
+        print(f"    refreshed production_bible.json: {pb_path.name}")
+    except Exception as e:  # noqa: BLE001
+        print(f"    production_bible.json refresh failed (non-fatal): {e}")
+    # Print suggested changes summary so the human knows what the next
+    # iteration will try to fix.
+    try:
+        from carryover import plan_carryover, plan_summary
+        plan = plan_carryover(metric)
+        print(f"    next-iteration carryover plan: {plan_summary(plan)}")
+    except Exception as e:  # noqa: BLE001
+        print(f"    carryover plan failed (non-fatal): {e}")
     return display_id, metric
 
 
