@@ -1,4 +1,4 @@
-"""scripts/api_smoke_test.py — validate every image and video API endpoint.
+"""scripts/api_smoke_test.py — validate every image, video, and audio API endpoint.
 
 Runs a minimal generation against every configured provider, reports
 OK / FAIL / SKIP per endpoint, and prints a summary table with timing
@@ -9,7 +9,7 @@ FAIL = key set but the call errored
 
 Usage
 -----
-    # All available endpoints (~$2-5 depending on keys set):
+    # All available endpoints (~$3-8 depending on keys set):
     python scripts/api_smoke_test.py
 
     # Images only:
@@ -18,9 +18,12 @@ Usage
     # Video only:
     python scripts/api_smoke_test.py --video
 
+    # Audio only:
+    python scripts/api_smoke_test.py --audio
+
     # One specific endpoint:
     python scripts/api_smoke_test.py --only gpt_image
-    python scripts/api_smoke_test.py --only flux-2-pro
+    python scripts/api_smoke_test.py --only stable_audio
 
     # List all endpoints without running:
     python scripts/api_smoke_test.py --list
@@ -28,20 +31,29 @@ Usage
 What each test costs (approximate)
 -----------------------------------
 Image endpoints:
-    gpt_image        ~$0.02   Runway / GPT Image 2 (low tier)
-    openai_image     ~$0.04   OpenAI direct / GPT Image 2 (low quality)
-    nano_banana      ~$0.02   Runway / Imagen 3 (with 1 ref)
-    reve_create      ~$0.01   Reve / create (text-only, for health check)
-    reve_remix       ~$0.01   Reve / remix (with 1 ref)
-    flux-pro         ~$0.05   BFL / FLUX.1 Pro (text-only)
-    flux-2-pro       ~$0.06   BFL / FLUX.2 Pro (with 1 ref)
+    gpt_image          ~$0.02   Runway / GPT Image 2 (low tier)
+    openai_image       ~$0.04   OpenAI direct / GPT Image 2 (low quality)
+    nano_banana        ~$0.02   Runway / Imagen 3 (with 1 ref)
+    google_nano_banana ~$0.04   Gemini 2.5 Flash Image direct
+    gen4_image         ~$0.05   Runway Gen4 (with 1 ref)
+    gen4_image_turbo   ~$0.02   Runway Gen4 Turbo (with 1 ref)
+    reve_create        ~$0.01   Reve / create (text-only)
+    reve_remix         ~$0.01   Reve / remix (with 1 ref)
+    flux-pro           ~$0.05   BFL / FLUX.1 Pro (text-only)
+    flux-2-pro         ~$0.06   BFL / FLUX.2 Pro (with 1 ref)
+    stable_image       ~$0.03   Stability / Stable Image Core
 
 Video endpoints:
-    seedance         ~$0.36   Runway / SeedDance 2 (4s @ 720p)
-    veo              ~$0.40   Runway / Veo 3.1 fast (5s @ 720p)
-    google_veo       ~$0.15   Google / Veo 3.1 direct (5s)
-    ltx-2-3-pro      ~$0.40   LTX / ltx-2-3-pro (6s @ 720p)
-    ltx-2-3-fast     ~$0.24   LTX / ltx-2-3-fast (6s @ 720p)
+    seedance           ~$0.36   Runway / SeedDance 2 (4s @ 720p)
+    veo                ~$0.40   Runway / Veo 3.1 fast (5s @ 720p)
+    google_veo         ~$0.15   Google / Veo 3.1 direct (6s @ 720p)
+    ltx-2-3-pro        ~$0.40   LTX / ltx-2-3-pro (6s @ 1080p)
+    ltx-2-3-fast       ~$0.24   LTX / ltx-2-3-fast (6s @ 1080p)
+
+Audio endpoints:
+    stable_audio       ~$0.10   Stability / music generation (10s)
+    runway_tts         ~$0.05   ElevenLabs Multilingual v2 via Runway
+    elevenlabs_sfx     ~$0.05   ElevenLabs SFX via Runway
 """
 from __future__ import annotations
 
@@ -149,6 +161,7 @@ def test_image_endpoints(only: set[str] | None) -> None:
         nano_banana,
         openai_image,
         reve_image,
+        stable_image,
         FLUX_PRO_MODEL,
     )
 
@@ -234,6 +247,13 @@ def test_image_endpoints(only: set[str] | None) -> None:
             required_key="BFL_API_KEY",
         )
 
+    if want("stable_image"):
+        run_test(
+            "stable_image",
+            lambda: stable_image(TEST_PROMPT, aspect_ratio="16:9", tier="core"),
+            required_key="STABILITY_API_KEY",
+        )
+
 
 # ── Video tests ───────────────────────────────────────────────────────────────
 
@@ -297,27 +317,79 @@ def test_video_endpoints(only: set[str] | None) -> None:
         )
 
 
+# ── Audio tests ───────────────────────────────────────────────────────────────
+
+def test_audio_endpoints(only: set[str] | None) -> None:
+    from prepare import (
+        elevenlabs_sfx,
+        runway_tts,
+        stable_audio,
+    )
+
+    def want(name: str) -> bool:
+        return only is None or name in only
+
+    print("\n── Audio endpoints ──────────────────────────────────────────")
+
+    if want("stable_audio"):
+        run_test(
+            "stable_audio",
+            lambda: stable_audio(
+                "Cinematic orchestral score, hushed strings, ominous low brass, "
+                "slow tempo, no melody, atmospheric.",
+                duration_seconds=10,
+            ),
+            required_key="STABILITY_API_KEY",
+        )
+
+    if want("runway_tts"):
+        run_test(
+            "runway_tts",
+            lambda: runway_tts(
+                text=("In the quiet hours before dawn, the forest holds its breath. "
+                      "Something has changed."),
+            ),
+            required_key="RUNWAYML_API_SECRET",
+        )
+
+    if want("elevenlabs_sfx"):
+        run_test(
+            "elevenlabs_sfx",
+            lambda: elevenlabs_sfx(
+                "Distant ocean waves crashing on rocks, gulls overhead.",
+                duration_seconds=4,
+            ),
+            required_key="RUNWAYML_API_SECRET",
+        )
+
+
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 ALL_IMAGE = {
     "gpt_image", "openai_image", "nano_banana", "google_nano_banana",
     "gen4_image", "gen4_image_turbo",
     "reve_create", "reve_remix", "flux-pro", "flux-2-pro",
+    "stable_image",
 }
 ALL_VIDEO = {
     "seedance", "veo", "google_veo", "ltx-2-3-pro", "ltx-2-3-fast",
 }
-ALL_ENDPOINTS = ALL_IMAGE | ALL_VIDEO
+ALL_AUDIO = {
+    "stable_audio", "runway_tts", "elevenlabs_sfx",
+}
+ALL_ENDPOINTS = ALL_IMAGE | ALL_VIDEO | ALL_AUDIO
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Smoke-test every image and video API endpoint."
+        description="Smoke-test every image, video, and audio API endpoint."
     )
     parser.add_argument("--image", action="store_true",
                         help="Test image endpoints only")
     parser.add_argument("--video", action="store_true",
                         help="Test video endpoints only")
+    parser.add_argument("--audio", action="store_true",
+                        help="Test audio endpoints only")
     parser.add_argument("--only", metavar="NAME", action="append", default=[],
                         help="Test specific endpoint(s) by name (repeatable)")
     parser.add_argument("--list", action="store_true",
@@ -331,6 +403,9 @@ def main() -> None:
         print("Video endpoints:")
         for n in sorted(ALL_VIDEO):
             print(f"  {n}")
+        print("Audio endpoints:")
+        for n in sorted(ALL_AUDIO):
+            print(f"  {n}")
         return
 
     # Load .env if present
@@ -342,8 +417,12 @@ def main() -> None:
 
     only: set[str] | None = set(args.only) if args.only else None
 
-    run_image = not args.video or args.image
-    run_video = not args.image or args.video
+    # If any --image/--video/--audio is passed, run only those.
+    # If none passed, run all.
+    explicit = args.image or args.video or args.audio
+    run_image = args.image or not explicit
+    run_video = args.video or not explicit
+    run_audio = args.audio or not explicit
 
     t_start = time.time()
 
@@ -351,6 +430,8 @@ def main() -> None:
         test_image_endpoints(only)
     if run_video:
         test_video_endpoints(only)
+    if run_audio:
+        test_audio_endpoints(only)
 
     # ── Summary ───────────────────────────────────────────────────────────────
     total_elapsed = time.time() - t_start

@@ -73,10 +73,14 @@ from prepare import (
     reve_image,
     route_shot,
     runway_image,
+    runway_tts,
     seedance,
     stable_audio,
+    stable_image,
     veo,
     veo_final_model,
+    DEFAULT_NARRATION_VOICE,
+    RUNWAY_VOICE_IDS,
 )
 from transitions import (
     DEFAULT_DURATION as TRANSITION_DEFAULT_DURATION,
@@ -416,12 +420,21 @@ are given. Produce a sequence of SCREENPLAY ELEMENTS in your own words:
     character_id field for the speaker. Optional parenthetical for tone
     (one or two words: "quietly", "amused", "warning").
 
+  - "narration" elements: voice-over narration (V.O.) that rides over
+    the visual. Use sparingly — only when the source uses interior
+    monologue, expository framing, or first-person reflection that
+    cannot be shown visually. Each narration element MUST be at most
+    35 words. The character field, if set, identifies whose V.O. it is
+    (a character_id or "narrator" for an omniscient narrator). Narration
+    is rendered as ElevenLabs TTS and layered over the scene's clips.
+
   - "transition" elements: rare; only where the scene needs a hard
     transition like CUT TO BLACK or SMASH CUT.
 
 Aim for 4-10 elements per scene. Mix action and dialogue. Open with an
 action line establishing the visual; close with the strongest beat of
-the summary. Return only via the tool."""
+the summary. Add narration only where it earns its place. Return only
+via the tool."""
 
 SCREENPLAY_FORMAT_TOOL_SCHEMA = {
     "description": "Submit formatted screenplay elements for one scene.",
@@ -437,15 +450,15 @@ SCREENPLAY_FORMAT_TOOL_SCHEMA = {
                     "properties": {
                         "type": {
                             "type": "string",
-                            "enum": ["action", "dialogue", "transition"],
+                            "enum": ["action", "dialogue", "narration", "transition"],
                         },
                         "text": {
                             "type": "string",
-                            "description": "Action line (≤25 words) or dialogue line (≤15 words).",
+                            "description": "Action ≤25 words, dialogue ≤15 words, narration ≤35 words.",
                         },
                         "character": {
                             "type": "string",
-                            "description": "character_id; required for dialogue.",
+                            "description": "character_id; required for dialogue. For narration: character_id or 'narrator'.",
                         },
                         "parenthetical": {
                             "type": "string",
@@ -702,6 +715,14 @@ def _generate_image_t2i(
             "flux-pro",
             lambda: flux_image(prompt, width=1344, height=768,
                                model=FLUX_PRO_MODEL),
+        ))
+
+    # Stability AI — absolute last resort. Uses STABILITY_API_KEY (already
+    # required for the music stage). Stable Image Core is the cheapest tier.
+    if os.environ.get("STABILITY_API_KEY"):
+        attempts.append((
+            "stable_image",
+            lambda: stable_image(prompt, aspect_ratio="16:9", tier="core"),
         ))
 
     last_exc: Exception | None = None
@@ -1397,6 +1418,110 @@ def build_music(exp: Experiment, script: dict, storyboard: dict) -> None:
     _tprint(f"  Generating {len(script['scenes'])} music cue(s) "
             f"({'parallel' if MAX_WORKERS > 1 else 'serial'})...")
     _parallel_run("music", script["scenes"], _do_music)
+
+
+# ============================================================================
+# STAGE 6.5 — Narration / voice-over (ElevenLabs TTS via Runway)
+# ============================================================================
+
+def _scene_narration_text(scene: dict) -> tuple[str, str | None]:
+    """Concatenate all `narration` elements in a scene into a single block.
+
+    Returns (text, voice_id_or_None). Voice is taken from the first
+    narration element's `character` field if it maps to a known preset;
+    otherwise None (caller picks the default voice).
+    """
+    parts: list[str] = []
+    voice_hint: str | None = None
+    for el in scene.get("elements", []) or []:
+        if el.get("type") != "narration":
+            continue
+        text = (el.get("text") or "").strip()
+        if not text:
+            continue
+        # Prepend parenthetical tone hint as ElevenLabs audio tag if present
+        # (e.g. "(quietly)" → "[whispers]"). Only the most common ones map.
+        paren = (el.get("parenthetical") or "").strip().lower()
+        tag_map = {
+            "whisper":   "[whispers]",
+            "quiet":     "[whispers]",
+            "quietly":   "[whispers]",
+            "warmly":    "[soft]",
+            "amused":    "[chuckles]",
+            "warning":   "[serious]",
+            "urgent":    "[urgent]",
+        }
+        tag = tag_map.get(paren, "")
+        parts.append(f"{tag} {text}".strip())
+        if voice_hint is None and el.get("character"):
+            voice_hint = el["character"]
+    return " ".join(parts), voice_hint
+
+
+def build_narration(exp: Experiment, script: dict, cast: list[dict]) -> None:
+    """Generate per-scene narration audio (V.O.) via ElevenLabs TTS.
+
+    Walks each scene's screenplay elements, collects all `narration`
+    elements, and synthesizes a single MP3 per scene at
+    `narration/{scene_id}.mp3`. Scenes without narration elements are
+    skipped (no file written).
+
+    The audio mix step (compile_final) layers this MP3 over the scene's
+    clips when present.
+    """
+    # Map character_id → preferred voice slot (first character gets
+    # rachel, second gets george, etc.). The "narrator" sentinel always
+    # uses the default rachel voice.
+    voice_pool = list(RUNWAY_VOICE_IDS.values())
+    char_voice: dict[str, str] = {}
+    for i, c in enumerate(cast):
+        char_voice[c["id"]] = voice_pool[(i + 1) % len(voice_pool)]
+
+    def _do_narration(scene: dict) -> None:
+        scene_id = scene["id"]
+        out_path = exp.path(f"narration/{scene_id}.mp3")
+        if out_path.exists():
+            return
+
+        text, voice_hint = _scene_narration_text(scene)
+        if not text:
+            return  # No narration in this scene
+
+        # Pick voice: explicit character_id → that character's voice,
+        # "narrator" → default, else default.
+        voice_id = (
+            char_voice.get(voice_hint)
+            if voice_hint and voice_hint != "narrator"
+            else RUNWAY_VOICE_IDS[DEFAULT_NARRATION_VOICE]
+        )
+
+        try:
+            audio = runway_tts(text=text, voice_id=voice_id)
+            out_path.write_bytes(audio)
+            _tprint(f"  ✓ narration/{scene_id} ({len(text)} chars, "
+                    f"{len(audio)//1024}kB)")
+        except Exception as e:  # noqa: BLE001
+            _tprint(f"  ⚠ Narration {scene_id} failed: {e}")
+
+        exp.log_prompt(
+            target=f"narration/{scene_id}.mp3",
+            model="eleven_multilingual_v2",
+            prompt=text[:200],
+            stage="narration",
+            scene=scene_id,
+            voice_id=voice_id,
+        )
+
+    n_with_narration = sum(
+        1 for s in script["scenes"]
+        if any(e.get("type") == "narration" for e in (s.get("elements") or []))
+    )
+    if n_with_narration == 0:
+        _tprint("  No narration in script — skipping TTS stage.")
+        return
+    _tprint(f"  Generating narration for {n_with_narration} scene(s) "
+            f"({'parallel' if MAX_WORKERS > 1 else 'serial'})...")
+    _parallel_run("narration", script["scenes"], _do_narration)
 
 
 # ============================================================================
@@ -2175,6 +2300,9 @@ def run(exp: Experiment) -> Path:
 
     print(f"[{exp.exp_id}] Stage 6: music")
     build_music(exp, script, storyboard)
+
+    print(f"[{exp.exp_id}] Stage 6.5: narration")
+    build_narration(exp, script, cast)
 
     print(f"[{exp.exp_id}] Stage 7: first frames")
     build_first_frames(exp, script, cast, locations, lookbook, storyboard)

@@ -1525,6 +1525,152 @@ def stable_audio(prompt: str, duration_seconds: int = 30) -> bytes:
     return resp.content
 
 
+# Stability image model tiers — picked by quality vs cost.
+# Stable Image Ultra is the best (SD3.5 Large, 8 credits / image)
+# Stable Image Core is the cheapest (3 credits / image)
+# SD3.5 Large is a middle ground (6.5 credits / image)
+STABILITY_IMAGE_BASE = "https://api.stability.ai/v2beta/stable-image"
+
+
+@api_retry
+def stable_image(
+    prompt: str,
+    aspect_ratio: str = "16:9",
+    tier: str = "core",
+    output_format: str = "png",
+) -> bytes:
+    """Stability AI text-to-image — last-resort fallback in t2i chain.
+
+    Stability Video is no longer available via API (deprecated 2025), so
+    this function is image-only.
+
+    Tiers (cost / quality):
+      - "ultra" → /generate/ultra        SD3.5 Large, 8 credits, top quality
+      - "sd3"   → /generate/sd3          SD3.5 Large, 6.5 credits
+      - "core"  → /generate/core         3 credits, fastest (default)
+
+    Aspect ratios: 16:9, 1:1, 21:9, 2:3, 3:2, 4:5, 5:4, 9:16, 9:21.
+    Returns image bytes (default PNG).
+    """
+    api_key = _require_key("STABILITY_API_KEY")
+    endpoint_map = {
+        "ultra": f"{STABILITY_IMAGE_BASE}/generate/ultra",
+        "sd3":   f"{STABILITY_IMAGE_BASE}/generate/sd3",
+        "core":  f"{STABILITY_IMAGE_BASE}/generate/core",
+    }
+    url = endpoint_map.get(tier, endpoint_map["core"])
+
+    # Cap prompt to 9500 chars (Stability limit ~10K, leave a margin).
+    prompt = prompt[:9500]
+
+    resp = httpx.post(
+        url,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Accept":        f"image/{output_format}",
+        },
+        files={
+            "prompt":        (None, prompt),
+            "aspect_ratio":  (None, aspect_ratio),
+            "output_format": (None, output_format),
+        },
+        timeout=180.0,
+    )
+    if not resp.is_success:
+        try:
+            detail = resp.json()
+        except Exception:
+            detail = resp.text[:400]
+        raise RuntimeError(f"Stability image {resp.status_code}: {detail}")
+    return resp.content
+
+
+# Runway TTS via ElevenLabs Multilingual v2 — for narration / voice-over.
+# Available since Sept 2025; same auth as other Runway endpoints.
+RUNWAY_TTS_MODEL = "eleven_multilingual_v2"
+
+# A small set of preset voice IDs for default narration. Override per-call
+# by passing voice_id explicitly. These are commonly used ElevenLabs voices.
+RUNWAY_VOICE_IDS: dict[str, str] = {
+    "rachel":    "21m00Tcm4TlvDq8ikWAM",   # warm female narrator
+    "george":    "JBFqnCBsd6RMkjVDRZzb",   # mature male narrator
+    "antoni":    "ErXwobaYiN019PkySvjV",   # clear male narrator
+    "bella":     "EXAVITQu4vr4xnSDxMaL",   # soft female
+    "sam":       "yoZ06aMxZJJ28mfd3POQ",   # neutral male
+}
+DEFAULT_NARRATION_VOICE = "rachel"
+
+
+@api_retry
+def runway_tts(
+    text: str,
+    voice_id: str | None = None,
+    model: str = RUNWAY_TTS_MODEL,
+) -> bytes:
+    """Generate narration audio via ElevenLabs Multilingual v2 (through Runway).
+
+    Used for voice-over narration tracks layered over scene audio. The
+    pipeline calls this for each `narration` screenplay element.
+
+    voice_id: ElevenLabs voice ID. If unset, picks the rachel preset.
+    Returns MP3 bytes.
+
+    The Runway SDK exposes this as `text_to_speech.create(...)`. If the
+    SDK shape differs in your version, fall back to the direct ElevenLabs
+    API by setting ELEVENLABS_API_KEY (handled below).
+    """
+    voice = voice_id or RUNWAY_VOICE_IDS[DEFAULT_NARRATION_VOICE]
+
+    # Try Runway SDK path first.
+    try:
+        client = runway_client()
+        if hasattr(client, "text_to_speech"):
+            task = client.text_to_speech.create(
+                model=model,
+                text=text,
+                voice_id=voice,
+            ).wait_for_task_output()
+            if task.output:
+                return httpx.get(task.output[0], timeout=120.0).content
+    except Exception:
+        # Fall through to direct ElevenLabs path
+        pass
+
+    # Direct ElevenLabs API fallback (requires ELEVENLABS_API_KEY).
+    el_key = os.environ.get("ELEVENLABS_API_KEY")
+    if not el_key:
+        raise RuntimeError(
+            "Runway SDK has no text_to_speech method and no ELEVENLABS_API_KEY "
+            "is set. Either upgrade the runwayml package or set ELEVENLABS_API_KEY."
+        )
+    resp = httpx.post(
+        f"https://api.elevenlabs.io/v1/text-to-speech/{voice}",
+        headers={
+            "xi-api-key":   el_key,
+            "Content-Type": "application/json",
+            "Accept":       "audio/mpeg",
+        },
+        json={
+            "text":     text[:5000],
+            "model_id": model,
+            "voice_settings": {
+                "stability":        0.5,
+                "similarity_boost": 0.75,
+                "style":            0.2,
+                "use_speaker_boost": True,
+            },
+        },
+        timeout=120.0,
+    )
+    if not resp.is_success:
+        try:
+            detail = resp.json()
+        except Exception:
+            detail = resp.text[:400]
+        raise RuntimeError(f"ElevenLabs TTS {resp.status_code}: {detail}")
+    return resp.content
+
+
 # FLUX model strings.
 # flux-2-pro-preview — latest FLUX.2, multi-reference editing (up to 8 refs)
 # flux-pro-1.1       — fast text-to-image, no reference support
