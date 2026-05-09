@@ -759,53 +759,23 @@ def _veo_first_frame(image_prompt: str) -> bytes:
         return png_path.read_bytes()
 
 
-def _generate_moodboard(prompt_text: str, slug: str) -> bytes:
-    """Generate a location moodboard image with progressive fallback.
+def _generate_moodboard(prompt_text: str, slug: str,
+                        ref_imgs: list[bytes] | None = None) -> bytes:
+    """Generate a location moodboard image.
 
-    Attempt order:
-      1. nano_banana  + original prompt
-      2. nano_banana  + Claude-rephrased prompt   (same model, softer wording)
-      3. gpt_image    + Claude-rephrased prompt   (different model)
-      4. gpt_image    + original prompt            (different model, original wording)
-      5. veo          + rephrased prompt, extract first frame  (last resort)
-
-    Each failure is logged. Raises RuntimeError only if every attempt fails.
+    Delegates to _generate_image() so moodboards use the same fallback
+    chain as scene frames — including nano_banana with refs,
+    google_nano_banana, reve, flux-2-pro, and flux-pro. When ref_imgs are
+    provided (e.g. a previously generated style frame or earlier
+    moodboard), they're passed to the ref-aware models in the chain.
     """
-    rephrased: str | None = None
-
-    def get_rephrased() -> str:
-        nonlocal rephrased
-        if rephrased is None:
-            print(f"    ↻ Rephrasing prompt for {slug}...")
-            rephrased = _rephrase_prompt(prompt_text)
-            print(f"    → {rephrased[:120]}{'...' if len(rephrased) > 120 else ''}")
-        return rephrased
-
-    attempts = [
-        ("nano_banana",  lambda: nano_banana(prompt_text)),
-        ("nano_banana*", lambda: nano_banana(get_rephrased())),
-        ("gpt_image*",   lambda: gpt_image(get_rephrased(), quality="standard")),
-        ("gpt_image",    lambda: gpt_image(prompt_text, quality="standard")),
-        ("veo→frame*",   lambda: _veo_first_frame(get_rephrased())),
-    ]
-
-    last_exc: Exception | None = None
-    for model_label, fn in attempts:
-        _check_daily_limit()
-        try:
-            print(f"    [{model_label}] generating moodboard for {slug}...")
-            result = fn()
-            print(f"    ✓ {model_label} succeeded ({len(result)//1024}kB)")
-            return result
-        except Exception as e:  # noqa: BLE001
-            if _is_daily_limit(e):
-                _record_daily_limit(e, f"moodboard/{slug}")
-                raise
-            print(f"    ✗ {model_label} failed: {e}")
-            last_exc = e
-
-    raise RuntimeError(
-        f"All moodboard attempts failed for {slug}. Last error: {last_exc}"
+    return _generate_image(
+        prompt=prompt_text,
+        ref_imgs=ref_imgs or [],
+        moodboard=None,
+        size="1792x1024",
+        quality="high",
+        context=f"moodboard/{slug}",
     )
 
 
