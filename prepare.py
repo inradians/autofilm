@@ -1777,7 +1777,10 @@ def stable_image(
         url,
         headers={
             "Authorization": f"Bearer {api_key}",
-            "Accept":        f"image/{output_format}",
+            # Stability requires "image/*" or "application/json" — NOT a
+            # specific subtype like "image/png". The output format is
+            # controlled by the output_format form field below.
+            "Accept":        "image/*",
         },
         files={
             "prompt":        (None, prompt),
