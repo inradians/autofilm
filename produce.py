@@ -32,15 +32,12 @@ from typing import Any
 
 from prepare import (
     Experiment,
-    FLUX_DEV_MODEL,
-    FLUX_PRO_MODEL,
     GEMINI_FLASH_MODEL,
     GEN4_IMAGE_MODEL,
     GPT_IMAGE_MODEL,
     MAX_PLANNED_SHOT_SECONDS,
     MAX_SCENES,
     NANO_BANANA_MODEL,
-    SEEDANCE2_MODEL,
     SHOT_DURATION_SECONDS,
     TAKES_PER_SHOT,
     VEO_MODEL_LITE,
@@ -52,7 +49,6 @@ from prepare import (
     elevenlabs_sfx,
     extract_video_frame,
     ffmpeg,
-    flux_image,
     gpt_image,
     nano_banana,
     plan_shot_durations,
@@ -123,20 +119,8 @@ MUSIC_STYLE = (
 # (useful for debugging; every print statement appears in order).
 MAX_WORKERS: int = int(os.getenv("MAX_WORKERS", "4"))
 
-# Model used for reference image generation (composition + identity lock).
-# Default: FLUX_PRO_MODEL — fast, high-quality, and has celebrities in its
-# training dataset so name-based prompts produce accurate likenesses.
-# Fallback chain: FLUX_DEV → gemini_flash → nano_banana → gen4_image.
-# Override: REFERENCE_IMAGE_MODEL=flux-dev for half the cost; or
-#           REFERENCE_IMAGE_MODEL=gemini_2.5_flash to skip BFL entirely.
-REFERENCE_IMAGE_MODEL: str = os.getenv("REFERENCE_IMAGE_MODEL", FLUX_PRO_MODEL)
-
 # Thread-safe print — prevents interleaved output from parallel workers.
 _PRINT_LOCK = threading.Lock()
-
-# Serialises DuckDuckGo image searches — DDG 403-rate-limits concurrent
-# requests, so all photo fetches must go through this lock one at a time.
-_PHOTO_SEARCH_LOCK = threading.Lock()
 
 
 def _tprint(*args, **kwargs) -> None:
@@ -778,377 +762,101 @@ def style_preamble(lookbook: dict) -> str:
 # STAGE 4 — Per-scene per-character reference images (identity locking)
 # ============================================================================
 
-def _fetch_actor_photos(actor: str, n: int = 3) -> list[bytes]:
-    """Web search for press/official photos of an actor, return up to n bytes.
+# ============================================================================
+# STAGE 4 — Per-scene per-character reference images
+# ============================================================================
+# Virtual actors only — no real celebrities, no web photo searches, no FLUX.
+# Each reference image is generated from the character's physical description
+# as written in the source book. GPT Image 2 (standard tier) is the primary
+# model; nano_banana is the fallback.
+#
+# The prompt is intentionally compact (<900 chars) to stay within Runway's
+# promptText limit and to keep generation fast and focused.
 
-    Searches are serialised via _PHOTO_SEARCH_LOCK — DDG 403-rate-limits
-    concurrent requests, so parallel reference-image workers must not call
-    this simultaneously. The in-memory cache in build_references means each
-    actor is only searched once per run regardless of how many scenes they
-    appear in.
+def _reference_prompt(character: dict, scene: dict, lookbook: dict) -> str:
+    """Build a reference image prompt from the character's book description.
 
-    Returns an empty list on any failure; caller falls back gracefully.
+    Deliberately compact — Runway's text_to_image API rejects prompts
+    longer than 1000 characters. Keeps under 900 to leave headroom.
     """
-    try:
-        from ddgs import DDGS                           # new package name
-    except ImportError:
-        try:
-            from duckduckgo_search import DDGS          # old name fallback # type: ignore[no-redef]
-        except ImportError:
-            _tprint("    [photos] ddgs not installed; skipping web photo fetch."
-                    "  Run: uv add ddgs")
-            return []
+    style = ", ".join(lookbook.get("style_keywords", []))[:120]
+    desc  = character.get("description", "")[:300]
+    name  = character.get("name", "the character")
+    loc   = scene.get("location", "")[:80]
+    tod   = scene.get("time_of_day", "day")
+    mood  = scene.get("mood", "")[:60]
 
-    _tprint(f"    [photos] searching for {actor}...")
-    results: list[dict] = []
-
-    with _PHOTO_SEARCH_LOCK:
-        for attempt in range(4):
-            backoff = (2 ** attempt) * 1.5    # 1.5s → 3s → 6s → 12s
-            if attempt > 0:
-                _tprint(f"    [photos] rate-limited, retrying in {backoff:.0f}s "
-                        f"({attempt + 1}/4)...")
-                time.sleep(backoff)
-            try:
-                with DDGS() as ddgs:
-                    results = list(ddgs.images(
-                        f"{actor} actor official press portrait headshot",
-                        max_results=n * 4,
-                        safesearch="on",
-                    ))
-                break   # success
-            except Exception as e:
-                err = str(e)
-                is_rate_limit = "403" in err or "atelimit" in err
-                if attempt == 3 or not is_rate_limit:
-                    _tprint(f"    [photos] DDG failed after {attempt+1} attempt(s) ({e}); skipping")
-                    break
-        time.sleep(1.2)   # polite pause before releasing lock
-
-    photos: list[bytes] = []
-    for r in results:
-        if len(photos) >= n:
-            break
-        url = r.get("image", "")
-        if not url:
-            continue
-        try:
-            resp = httpx.get(
-                url, timeout=15.0, follow_redirects=True,
-                headers={"User-Agent": "Mozilla/5.0 (compatible; autofilm/1.0)"},
-            )
-            data = resp.content
-            is_jpeg = data[:3] == b"\xff\xd8\xff"
-            is_png  = data[:8] == b"\x89PNG\r\n\x1a\n"
-            is_webp = data[:4] == b"RIFF" and data[8:12] == b"WEBP"
-            if (is_jpeg or is_png or is_webp) and len(data) >= 10_000:
-                photos.append(data)
-        except Exception:
-            continue
-
-    _tprint(f"    [photos] fetched {len(photos)}/{n} photo(s) for {actor}")
-    return photos
-
-
-def reference_image_prompt(
-    lookbook: dict, character: dict, scene: dict, actor: str | None = None
-) -> str:
-    """Build a reference image prompt for a cast member.
-
-    When ``actor`` is provided (and the model is FLUX), the name is
-    included directly — FLUX has celebrities in its training data and
-    reliably generates accurate likenesses from names. The @person_x
-    tag is also added for Runway models in the lock step fallback that
-    use it for reference image matching.
-    """
-    name_clause = (
-        f"SUBJECT: {actor} portraying {character['name']}."
-        if actor else
-        f"SUBJECT: a person portraying {character['name']} (@person_x). "
-        f"Match @person_x's face and appearance exactly from the reference images."
-    )
     return (
-        style_preamble(lookbook)
-        + "Cinematic film still, photorealistic, anamorphic 16:9, "
-        "shallow depth of field. Medium shot, eye-level.\n\n"
-        f"{name_clause}\n"
-        f"CHARACTER: {character.get('description', '')}\n"
-        f"LOCATION: {scene['location']}, {scene.get('time_of_day', 'day')}.\n"
-        f"MOOD: {scene.get('mood', 'neutral')}.\n\n"
-        "NEGATIVE: no text, no logos, no UI, no watermarks."
-    )
-
-
-def _generate_reference_composition(
-    prompt_text: str, prompt_text_no_name: str, cid: str, scene_id: str
-) -> bytes:
-    """Generate a scene composition (step 1 of reference image pipeline).
-
-    Leads with FLUX using the actor's full name in text — FLUX is trained
-    on celebrities and generates accurate likenesses from names alone,
-    without needing reference photos. Falls back to Runway image models
-    (which don't handle celebrity names) using the de-named prompt.
-
-    Retry order:
-      1. FLUX Pro    + named prompt
-      2. FLUX Pro    + Claude-rephrased named prompt
-      3. FLUX Dev    + named prompt          (cheaper FLUX fallback)
-      4. gemini_flash + de-named prompt      (Runway, no celebrity names)
-      5. nano_banana  + de-named prompt
-    """
-    rephrased: str | None = None
-
-    def get_rephrased() -> str:
-        nonlocal rephrased
-        if rephrased is None:
-            print(f"      ↻ rephrasing for {cid}/{scene_id}...")
-            rephrased = _rephrase_prompt(prompt_text)
-        return rephrased
-
-    attempts = [
-        ("flux-pro",
-         lambda: flux_image(prompt_text)),
-        ("flux-pro*",
-         lambda: flux_image(get_rephrased())),
-        ("flux-dev",
-         lambda: flux_image(prompt_text, model=FLUX_DEV_MODEL)),
-        # Runway fallbacks — must use a valid Runway model name, not the BFL
-        # REFERENCE_IMAGE_MODEL constant which is "flux-pro-1.1".
-        ("gemini_flash",
-         lambda: runway_image(prompt_text_no_name, model=GEMINI_FLASH_MODEL)),
-        ("nano_banana",
-         lambda: nano_banana(prompt_text_no_name)),
-    ]
-
-    last_exc: Exception | None = None
-    for label, fn in attempts:
-        try:
-            print(f"      [{label}] composition for {cid}/{scene_id}...")
-            result = fn()
-            print(f"      ✓ {label} ({len(result)//1024}kB)")
-            return result
-        except Exception as e:  # noqa: BLE001
-            print(f"      ✗ {label}: {e}")
-            last_exc = e
-
-    raise RuntimeError(
-        f"All composition attempts failed for {cid}/{scene_id}. Last: {last_exc}"
-    )
-
-
-def _generate_reference_lock(
-    prompt_text: str,
-    actor_photos: list[bytes],
-    moodboards: list[bytes],
-    composition: bytes,
-    cid: str,
-    scene_id: str,
-) -> bytes:
-    """Fuse composition + actor photos + moodboard into a locked reference
-    image (step 2 of the reference image pipeline).
-
-    Actor photos are passed as 'person_x' reference images so the model
-    matches appearance without the celebrity name appearing in text.
-
-    Uses REFERENCE_IMAGE_MODEL (default: gemini_2.5_flash) as first
-    choice — it natively supports reference images and is significantly
-    faster than nano_banana (gemini_image3_pro) or gen4_image.
-
-    Retry order (all attempts include all available reference images):
-      1. gemini_flash  + original prompt
-      2. gemini_flash  + Claude-rephrased prompt
-      3. nano_banana   + rephrased prompt
-      4. nano_banana   + original prompt
-      5. runway_image (gen4_image) + rephrased prompt
-      6. veo → frame   + rephrased prompt   (last resort)
-    """
-    refs = [composition] + actor_photos + moodboards
-    ref_tags = (
-        ["composition"]
-        + ["person_x"] * len(actor_photos)
-        + ["location"] * len(moodboards)
-    )
-
-    lock_prompt = (
-        prompt_text
-        + "\n\nReference image order: @composition (scene framing), "
-        "@person_x (character face and body — match exactly), "
-        "@location (environment). Preserve @person_x identity precisely."
-    )
-
-    rephrased: str | None = None
-
-    def get_rephrased_lock() -> str:
-        nonlocal rephrased
-        if rephrased is None:
-            print(f"      ↻ rephrasing lock prompt for {cid}/{scene_id}...")
-            rephrased = _rephrase_prompt(lock_prompt)
-        return rephrased
-
-    # SeedDance removed — FLUX handles celebrities better as a T2I model.
-    attempts: list[tuple[str, Any]] = [
-        ("gemini_flash",
-         lambda: runway_image(lock_prompt,
-                              reference_images=refs, reference_tags=ref_tags,
-                              model=GEMINI_FLASH_MODEL)),
-        ("gemini_flash*",
-         lambda: runway_image(get_rephrased_lock(),
-                              reference_images=refs, reference_tags=ref_tags,
-                              model=GEMINI_FLASH_MODEL)),
-        ("nano_banana*",
-         lambda: nano_banana(get_rephrased_lock(), reference_images=refs)),
-        ("nano_banana",
-         lambda: nano_banana(lock_prompt, reference_images=refs)),
-        ("runway_image*",
-         lambda: runway_image(get_rephrased_lock(),
-                              reference_images=refs, reference_tags=ref_tags,
-                              model=GEN4_IMAGE_MODEL)),
-        ("veo→frame*",
-         lambda: _veo_first_frame(get_rephrased_lock())),
-    ]
-
-    last_exc: Exception | None = None
-    for label, fn in attempts:
-        try:
-            print(f"      [{label}] locking {cid}/{scene_id} ({len(refs)} refs)...")
-            result = fn()
-            print(f"      ✓ {label} ({len(result)//1024}kB)")
-            return result
-        except Exception as e:  # noqa: BLE001
-            print(f"      ✗ {label}: {e}")
-            last_exc = e
-
-    raise RuntimeError(
-        f"All lock attempts failed for {cid}/{scene_id}. Last: {last_exc}"
+        f"Photorealistic cinematic film still. {style}. "
+        f"Anamorphic 16:9, shallow depth of field.\n\n"
+        f"SUBJECT: {name} — {desc}\n"
+        f"SCENE: {loc}, {tod}. Mood: {mood}.\n\n"
+        f"NEGATIVE: no text, no logos, no watermarks, no UI."
     )
 
 
 def build_references(exp: Experiment, script: dict, cast: list[dict],
                       locations: list[dict], lookbook: dict) -> dict:
-    actor_by_char = {row["character_id"]: row for row in cast}
-    char_by_id = {c["id"]: c for c in script["characters"]}
+    """Generate one reference image per character per scene.
+
+    Uses the character's physical description from the source book rather
+    than a real actor's name or photo. This avoids:
+      - Celebrity likeness / rights issues
+      - FLUX API reliability problems
+      - DuckDuckGo rate-limits and zero-result searches
+
+    Pipeline (single step, no composition+lock):
+      1. gpt_image(quality="standard")  — 2K tier, ~$0.10/image
+      2. nano_banana                    — fallback if GPT Image 2 fails
+    """
+    char_by_id   = {c["id"]: c for c in script["characters"]}
     loc_by_scene: dict[str, dict] = {}
     for loc in locations:
         for sid in loc.get("scene_ids", []):
             loc_by_scene[sid] = loc
 
-    actor_photos_root = exp.path("references/actor_photos")
     manifest: dict[str, dict[str, str]] = {}
-
-    # Cache fetched photos within this run to avoid re-searching for the same
-    # actor across multiple scenes. Protected by a lock for parallel access.
-    fetched_photos_cache: dict[str, list[bytes]] = {}
-    _cache_lock = threading.Lock()
-
-    # Collect all (scene, cid) work items upfront — each is independent.
     work_items = []
     for scene in script["scenes"]:
         scene_id = scene["id"]
         manifest.setdefault(scene_id, {})
-        loc = loc_by_scene.get(scene_id)
-        moodboards: list[bytes] = []
-        if loc:
-            moodboards = [
-                Path(p).read_bytes()
-                for p in loc.get("moodboard_paths", [])
-                if Path(p).exists()
-            ][:1]
         for cid in scene.get("characters", []):
-            if char_by_id.get(cid) and actor_by_char.get(cid):
-                work_items.append((scene, cid, moodboards))
+            if cid in char_by_id:
+                work_items.append((scene, cid))
 
     def _do_reference(item: tuple) -> tuple[str, str, str] | None:
-        scene, cid, moodboards = item
-        scene_id = scene["id"]
+        scene, cid = item
+        scene_id  = scene["id"]
         character = char_by_id[cid]
-        cast_row  = actor_by_char[cid]
         out_path  = exp.path(f"references/{cid}/{scene_id}.png")
 
         if out_path.exists():
             return scene_id, cid, str(out_path)
 
-        actor      = cast_row["actor"]
-        actor_slug = actor.lower().replace(" ", "_")
+        ref_prompt = _reference_prompt(character, scene, lookbook)
 
-        # ── Gather actor photos ─────────────────────────────────────────
-        actor_imgs: list[bytes] = []
-        photos_dir = actor_photos_root / actor_slug
-        if photos_dir.exists():
-            for p in sorted(
-                list(photos_dir.glob("*.png")) + list(photos_dir.glob("*.jpg"))
-            )[:3]:
-                actor_imgs.append(p.read_bytes())
-            _tprint(f"    [photos] {len(actor_imgs)} local photo(s) for {actor}")
-
-        if len(actor_imgs) < 2:
-            with _cache_lock:
-                if actor not in fetched_photos_cache:
-                    # Release lock during the slow network fetch so other
-                    # threads aren't blocked, then re-acquire to write.
-                    pass  # fetch happens outside the lock below
-                cached = fetched_photos_cache.get(actor)
-
-            if cached is None:
-                web = _fetch_actor_photos(actor, n=3 - len(actor_imgs))
-                with _cache_lock:
-                    # Another thread may have fetched concurrently — keep
-                    # whichever result came first.
-                    fetched_photos_cache.setdefault(actor, web)
-                    cached = fetched_photos_cache[actor]
-
-            web_photos = cached
-            photos_dir.mkdir(parents=True, exist_ok=True)
-            for i, img_bytes in enumerate(web_photos):
-                save_path = photos_dir / f"web_{i:02d}.jpg"
-                if not save_path.exists():
-                    save_path.write_bytes(img_bytes)
-            actor_imgs = actor_imgs + web_photos
-
-        # ── Build prompts ────────────────────────────────────────────────
-        # Named: actor name in text — for FLUX which handles celebrities.
-        # De-named: @person_x tag — for Runway models that reject names.
-        ref_prompt_named   = reference_image_prompt(lookbook, character, scene, actor=actor)
-        ref_prompt_no_name = reference_image_prompt(lookbook, character, scene, actor=None)
-
-        try:
-            composition = _generate_reference_composition(
-                ref_prompt_named, ref_prompt_no_name, cid, scene_id
-            )
-            exp.write_bytes(
-                f"references/{cid}/{scene_id}.composition.png", composition
-            )
-            exp.log_prompt(
-                target=f"references/{cid}/{scene_id}.composition.png",
-                model=FLUX_PRO_MODEL,
-                prompt=ref_prompt_named,
-                stage="reference_composition",
-                character=cid, scene=scene_id,
-            )
-
-            if actor_imgs or moodboards:
-                locked = _generate_reference_lock(
-                    ref_prompt_no_name, actor_imgs, moodboards,
-                    composition, cid, scene_id,
-                )
+        for label, fn in [
+            ("gpt_image", lambda: gpt_image(ref_prompt, size="1344x768", quality="standard")),
+            ("nano_banana", lambda: nano_banana(ref_prompt)),
+        ]:
+            try:
+                _tprint(f"    [{label}] reference for {cid}/{scene_id}")
+                img = fn()
+                out_path.write_bytes(img)
                 exp.log_prompt(
                     target=f"references/{cid}/{scene_id}.png",
-                    model=REFERENCE_IMAGE_MODEL,
-                    prompt=ref_prompt_no_name,
-                    stage="reference_lock",
+                    model=GPT_IMAGE_MODEL,
+                    prompt=ref_prompt,
+                    stage="reference",
                     character=cid, scene=scene_id,
-                    n_actor_photos=len(actor_imgs),
-                    n_moodboards=len(moodboards),
                 )
-            else:
-                _tprint(f"    ℹ No actor photos or moodboards for {cid}/{scene_id}; using composition.")
-                locked = composition
+                _tprint(f"    \u2713 {label} {cid}/{scene_id} ({len(img)//1024}kB)")
+                return scene_id, cid, str(out_path)
+            except Exception as e:  # noqa: BLE001
+                _tprint(f"    \u2717 [{label}] {cid}/{scene_id}: {e}")
 
-            out_path.write_bytes(locked)
-            return scene_id, cid, str(out_path)
-
-        except RuntimeError as e:
-            _tprint(f"  ⚠ All reference image attempts exhausted for {cid}/{scene_id}: {e}")
-            return None
+        _tprint(f"  \u26a0 Reference failed for {cid}/{scene_id} — skipping")
+        return None
 
     _tprint(f"  Generating {len(work_items)} reference image(s) "
             f"({'parallel' if MAX_WORKERS > 1 else 'serial'}, "
@@ -1393,15 +1101,11 @@ def build_first_frames(exp: Experiment, script: dict, cast: list[dict],
         )
 
         # ── Step 1: Compose the frame ─────────────────────────────────
-        # FLUX leads because the prompt contains celebrity names. Fallback
-        # to Runway models strips the name context but they're still useful
-        # with the identity-lock step that follows.
         composition: bytes | None = None
-        composition_model = FLUX_PRO_MODEL
+        composition_model = GPT_IMAGE_MODEL
         for label, fn in [
-            ("flux-pro",  lambda: flux_image(ff_prompt)),
-            ("flux-pro*", lambda: flux_image(_rephrase_prompt(ff_prompt))),
-            ("flux-dev",  lambda: flux_image(ff_prompt, model=FLUX_DEV_MODEL)),
+            ("gpt_image",   lambda: gpt_image(ff_prompt, size="1792x1024", quality="high")),
+            ("gpt_image*",  lambda: gpt_image(_rephrase_prompt(ff_prompt), size="1792x1024", quality="standard")),
             ("nano_banana", lambda: nano_banana(ff_prompt)),
         ]:
             try:
