@@ -65,7 +65,19 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 # Import after path setup so the UI can stand alone.
-from prepare import EXPERIMENTS_DIR, iter_all_experiments  # noqa: E402
+import prepare  # noqa: E402
+from prepare import iter_all_experiments  # noqa: E402
+
+# Allow UI smoke tests to point the server at an isolated temp dir
+# without touching the real experiments tree. When the env var is set,
+# we override prepare.EXPERIMENTS_DIR — that's the single source of
+# truth used by every helper (iter_all_experiments, Experiment.load,
+# etc.) so all endpoints behave consistently against the override.
+_TEST_EXP_DIR = os.environ.get("AUTOFILM_TEST_EXPERIMENTS_DIR")
+if _TEST_EXP_DIR:
+    prepare.EXPERIMENTS_DIR = Path(_TEST_EXP_DIR)
+
+EXPERIMENTS_DIR = prepare.EXPERIMENTS_DIR
 
 UI_DIR     = PROJECT_ROOT / "ui"
 UPLOAD_DIR = Path.home() / ".autofilm" / "uploads"
