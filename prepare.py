@@ -38,10 +38,11 @@ import json
 import os
 import subprocess
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable
+import threading
 
 import anthropic
 import httpx
@@ -415,6 +416,11 @@ class Experiment:
     """
     exp_id: str
     root: Path
+    # Per-experiment lock protecting prompts.json from concurrent writes.
+    # Excluded from __init__, __repr__, and __eq__ so it's transparent.
+    _log_lock: threading.Lock = field(
+        default_factory=threading.Lock, init=False, repr=False, compare=False
+    )
 
     @classmethod
     def new(cls, book_slug: str | None = None) -> "Experiment":
@@ -538,17 +544,20 @@ class Experiment:
         Writes (or upserts) into prompts.json. Bible's prompts section
         reads this and groups by model. Idempotent: re-logging the same
         target replaces the prior entry — useful for cached re-runs.
+        Thread-safe: protected by a per-experiment lock so parallel stages
+        don't corrupt the JSON file.
         """
-        log_path = self.root / "prompts.json"
-        if log_path.exists():
-            log = json.loads(log_path.read_text())
-        else:
-            log = {}
-        entry: dict = {"model": model, "prompt": prompt}
-        if meta:
-            entry["meta"] = meta
-        log[target] = entry
-        log_path.write_text(json.dumps(log, indent=2, ensure_ascii=False))
+        with self._log_lock:
+            log_path = self.root / "prompts.json"
+            if log_path.exists():
+                log = json.loads(log_path.read_text())
+            else:
+                log = {}
+            entry: dict = {"model": model, "prompt": prompt}
+            if meta:
+                entry["meta"] = meta
+            log[target] = entry
+            log_path.write_text(json.dumps(log, indent=2, ensure_ascii=False))
 
 
 # ============================================================================

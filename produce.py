@@ -24,6 +24,8 @@ from __future__ import annotations
 import base64
 import json
 import os
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
@@ -99,6 +101,73 @@ MUSIC_STYLE = (
     "orchestral cinematic score, sweeping strings and low brass, "
     "restrained, building tension, no vocals"
 )
+
+
+# ============================================================================
+# CONCURRENCY
+# ============================================================================
+
+# How many image/video/audio generation tasks to run in parallel.
+# Each task holds a live Runway API call polling for completion, so the
+# effective limit is whatever Runway allows concurrently on your account
+# (typically 10-20 tasks). Set to 1 to disable parallelism entirely
+# (useful for debugging; every print statement appears in order).
+MAX_WORKERS: int = int(os.getenv("MAX_WORKERS", "4"))
+
+# Thread-safe print — prevents interleaved output from parallel workers.
+_PRINT_LOCK = threading.Lock()
+
+
+def _tprint(*args, **kwargs) -> None:
+    """Thread-safe print. Use inside parallel worker functions."""
+    with _PRINT_LOCK:
+        print(*args, **kwargs)
+
+
+def _parallel_run(
+    label: str,
+    work_items: list,
+    worker_fn,
+    *,
+    workers: int | None = None,
+) -> list:
+    """Run worker_fn(item) for each item concurrently, collect results.
+
+    Falls back to serial execution when MAX_WORKERS == 1 (or when there's
+    only one item) so debugging and profiling remain easy.
+
+    Args:
+        label:      Short description used in failure messages.
+        work_items: List of arguments — one per worker_fn call.
+        worker_fn:  Callable that takes one item and returns a result.
+                    Must be thread-safe (no shared mutable state, or with
+                    appropriate locks around it).
+        workers:    Override for MAX_WORKERS. Defaults to MAX_WORKERS.
+
+    Returns:
+        List of successful return values (order is completion order, not
+        input order). Failed items are logged and omitted.
+    """
+    n = workers if workers is not None else MAX_WORKERS
+    if n <= 1 or len(work_items) <= 1:
+        results = []
+        for item in work_items:
+            try:
+                results.append(worker_fn(item))
+            except Exception as e:  # noqa: BLE001
+                print(f"  ✗ {label}: {e}")
+        return results
+
+    results: list = []
+    with ThreadPoolExecutor(max_workers=n) as pool:
+        futures = {pool.submit(worker_fn, item): item for item in work_items}
+        for future in as_completed(futures):
+            item = futures[future]
+            try:
+                results.append(future.result())
+            except Exception as e:  # noqa: BLE001
+                _tprint(f"  ✗ {label} {item}: {e}")
+    return results
 
 
 # ============================================================================
@@ -493,10 +562,11 @@ def cast_and_locations(exp: Experiment, script: dict) -> tuple[list[dict], list[
 
     # Generate ONE moodboard per location via Nano Banana 2 (it has the
     # world knowledge to render real-world locations accurately).
-    for loc in locations:
+    # All locations are independent — run in parallel.
+    def _do_moodboard(loc: dict) -> None:
         slug = loc["slug"]
         out_path = exp.path(f"location_moodboards/{slug}/00.png")
-        prompt = (
+        mb_prompt = (
             f"Cinematic empty-scene location reference photograph, no people. "
             f"{loc['description']}. "
             f"Palette: {', '.join(loc.get('color_palette', []))}. "
@@ -504,17 +574,22 @@ def cast_and_locations(exp: Experiment, script: dict) -> tuple[list[dict], list[
         )
         if not out_path.exists():
             try:
-                img = _generate_moodboard(prompt, slug)
+                img = _generate_moodboard(mb_prompt, slug)
                 out_path.write_bytes(img)
             except RuntimeError as e:
-                print(f"  ⚠ All moodboard attempts exhausted for {slug}: {e}")
+                _tprint(f"  ⚠ All moodboard attempts exhausted for {slug}: {e}")
         exp.log_prompt(
             target=f"location_moodboards/{slug}/00.png",
             model=NANO_BANANA_MODEL,
-            prompt=prompt,
+            prompt=mb_prompt,
             stage="moodboard",
         )
         loc["moodboard_paths"] = [str(p) for p in out_path.parent.glob("*.png")]
+
+    _tprint(f"  Generating {len(locations)} moodboard(s) "
+            f"({'parallel' if MAX_WORKERS > 1 else 'serial'}, "
+            f"MAX_WORKERS={MAX_WORKERS})...")
+    _parallel_run("moodboard", locations, _do_moodboard)
 
     exp.write_json("locations.json", locations)
     return cast, locations
@@ -858,9 +933,12 @@ def build_references(exp: Experiment, script: dict, cast: list[dict],
     manifest: dict[str, dict[str, str]] = {}
 
     # Cache fetched photos within this run to avoid re-searching for the same
-    # actor across multiple scenes.
+    # actor across multiple scenes. Protected by a lock for parallel access.
     fetched_photos_cache: dict[str, list[bytes]] = {}
+    _cache_lock = threading.Lock()
 
+    # Collect all (scene, cid) work items upfront — each is independent.
+    work_items = []
     for scene in script["scenes"]:
         scene_id = scene["id"]
         manifest.setdefault(scene_id, {})
@@ -872,93 +950,104 @@ def build_references(exp: Experiment, script: dict, cast: list[dict],
                 for p in loc.get("moodboard_paths", [])
                 if Path(p).exists()
             ][:1]
-
         for cid in scene.get("characters", []):
-            character = char_by_id.get(cid)
-            cast_row  = actor_by_char.get(cid)
-            if not character or not cast_row:
-                continue
-            out_path = exp.path(f"references/{cid}/{scene_id}.png")
-            if out_path.exists():
-                manifest[scene_id][cid] = str(out_path)
-                continue
+            if char_by_id.get(cid) and actor_by_char.get(cid):
+                work_items.append((scene, cid, moodboards))
 
-            actor = cast_row["actor"]
-            actor_slug = actor.lower().replace(" ", "_")
+    def _do_reference(item: tuple) -> tuple[str, str, str] | None:
+        scene, cid, moodboards = item
+        scene_id = scene["id"]
+        character = char_by_id[cid]
+        cast_row  = actor_by_char[cid]
+        out_path  = exp.path(f"references/{cid}/{scene_id}.png")
 
-            # ── Gather actor photos ──────────────────────────────────────
-            # Priority: local disk (user-placed) > web search > nothing.
-            actor_imgs: list[bytes] = []
+        if out_path.exists():
+            return scene_id, cid, str(out_path)
 
-            # 1. Local photos the user manually placed in references/actor_photos/
-            photos_dir = actor_photos_root / actor_slug
-            if photos_dir.exists():
-                for p in sorted(
-                    list(photos_dir.glob("*.png")) + list(photos_dir.glob("*.jpg"))
-                )[:3]:
-                    actor_imgs.append(p.read_bytes())
-                print(f"    [photos] {len(actor_imgs)} local photo(s) for {actor}")
+        actor      = cast_row["actor"]
+        actor_slug = actor.lower().replace(" ", "_")
 
-            # 2. Web search — if fewer than 2 local photos available
-            if len(actor_imgs) < 2:
+        # ── Gather actor photos ─────────────────────────────────────────
+        actor_imgs: list[bytes] = []
+        photos_dir = actor_photos_root / actor_slug
+        if photos_dir.exists():
+            for p in sorted(
+                list(photos_dir.glob("*.png")) + list(photos_dir.glob("*.jpg"))
+            )[:3]:
+                actor_imgs.append(p.read_bytes())
+            _tprint(f"    [photos] {len(actor_imgs)} local photo(s) for {actor}")
+
+        if len(actor_imgs) < 2:
+            with _cache_lock:
                 if actor not in fetched_photos_cache:
-                    fetched_photos_cache[actor] = _fetch_actor_photos(
-                        actor, n=3 - len(actor_imgs)
-                    )
-                web_photos = fetched_photos_cache[actor]
-                # Save to disk so they appear in the experiment dir and
-                # can be inspected / manually replaced.
-                photos_dir.mkdir(parents=True, exist_ok=True)
-                for i, img_bytes in enumerate(web_photos):
-                    save_path = photos_dir / f"web_{i:02d}.jpg"
-                    if not save_path.exists():
-                        save_path.write_bytes(img_bytes)
-                actor_imgs = actor_imgs + web_photos
+                    # Release lock during the slow network fetch so other
+                    # threads aren't blocked, then re-acquire to write.
+                    pass  # fetch happens outside the lock below
+                cached = fetched_photos_cache.get(actor)
 
-            # ── Build the prompt (no actor name in text) ─────────────────
-            ref_prompt = reference_image_prompt(lookbook, character, scene)
+            if cached is None:
+                web = _fetch_actor_photos(actor, n=3 - len(actor_imgs))
+                with _cache_lock:
+                    # Another thread may have fetched concurrently — keep
+                    # whichever result came first.
+                    fetched_photos_cache.setdefault(actor, web)
+                    cached = fetched_photos_cache[actor]
 
-            try:
-                # Step 1: Compose the scene without naming the actor.
-                composition = _generate_reference_composition(
-                    ref_prompt, cid, scene_id
-                )
-                exp.write_bytes(
-                    f"references/{cid}/{scene_id}.composition.png", composition
+            web_photos = cached
+            photos_dir.mkdir(parents=True, exist_ok=True)
+            for i, img_bytes in enumerate(web_photos):
+                save_path = photos_dir / f"web_{i:02d}.jpg"
+                if not save_path.exists():
+                    save_path.write_bytes(img_bytes)
+            actor_imgs = actor_imgs + web_photos
+
+        # ── Generate composition + identity lock ────────────────────────
+        ref_prompt = reference_image_prompt(lookbook, character, scene)
+        try:
+            composition = _generate_reference_composition(ref_prompt, cid, scene_id)
+            exp.write_bytes(
+                f"references/{cid}/{scene_id}.composition.png", composition
+            )
+            exp.log_prompt(
+                target=f"references/{cid}/{scene_id}.composition.png",
+                model=GPT_IMAGE_MODEL,
+                prompt=ref_prompt,
+                stage="reference_composition",
+                character=cid, scene=scene_id,
+            )
+
+            if actor_imgs or moodboards:
+                locked = _generate_reference_lock(
+                    ref_prompt, actor_imgs, moodboards,
+                    composition, cid, scene_id,
                 )
                 exp.log_prompt(
-                    target=f"references/{cid}/{scene_id}.composition.png",
-                    model=GPT_IMAGE_MODEL,
+                    target=f"references/{cid}/{scene_id}.png",
+                    model=NANO_BANANA_MODEL,
                     prompt=ref_prompt,
-                    stage="reference_composition",
+                    stage="reference_lock",
                     character=cid, scene=scene_id,
+                    n_actor_photos=len(actor_imgs),
+                    n_moodboards=len(moodboards),
                 )
+            else:
+                _tprint(f"    ℹ No actor photos or moodboards for {cid}/{scene_id}; using composition only.")
+                locked = composition
 
-                # Step 2: Lock identity with actor photos as person_x refs.
-                if actor_imgs or moodboards:
-                    locked = _generate_reference_lock(
-                        ref_prompt, actor_imgs, moodboards,
-                        composition, cid, scene_id,
-                    )
-                    exp.log_prompt(
-                        target=f"references/{cid}/{scene_id}.png",
-                        model=NANO_BANANA_MODEL,
-                        prompt=ref_prompt,
-                        stage="reference_lock",
-                        character=cid, scene=scene_id,
-                        n_actor_photos=len(actor_imgs),
-                        n_moodboards=len(moodboards),
-                    )
-                else:
-                    # No reference images available — use the composition directly.
-                    print(f"    ℹ No actor photos or moodboards for {cid}/{scene_id}; using composition only.")
-                    locked = composition
+            out_path.write_bytes(locked)
+            return scene_id, cid, str(out_path)
 
-                out_path.write_bytes(locked)
-                manifest[scene_id][cid] = str(out_path)
+        except RuntimeError as e:
+            _tprint(f"  ⚠ All reference image attempts exhausted for {cid}/{scene_id}: {e}")
+            return None
 
-            except RuntimeError as e:
-                print(f"  ⚠ All reference image attempts exhausted for {cid}/{scene_id}: {e}")
+    _tprint(f"  Generating {len(work_items)} reference image(s) "
+            f"({'parallel' if MAX_WORKERS > 1 else 'serial'}, "
+            f"MAX_WORKERS={MAX_WORKERS})...")
+    for result in _parallel_run("reference", work_items, _do_reference):
+        if result:
+            scene_id, cid, path = result
+            manifest[scene_id][cid] = path
 
     exp.write_json("references_manifest.json", manifest)
     return manifest
@@ -1084,25 +1173,31 @@ def build_storyboard(exp: Experiment, script: dict) -> dict:
 # ============================================================================
 
 def build_music(exp: Experiment, script: dict) -> None:
-    for scene in script["scenes"]:
+    def _do_music(scene: dict) -> None:
         scene_id = scene["id"]
         out_path = exp.path(f"music/{scene_id}.wav")
-        # Per-scene mood overlay onto the locked MUSIC_STYLE.
-        prompt = f"{MUSIC_STYLE}. Scene mood: {scene.get('mood', '')}. {scene.get('summary', '')[:200]}"
+        music_prompt = (
+            f"{MUSIC_STYLE}. Scene mood: {scene.get('mood', '')}. "
+            f"{scene.get('summary', '')[:200]}"
+        )
         if not out_path.exists():
             try:
-                audio = stable_audio(prompt, duration_seconds=30)
+                audio = stable_audio(music_prompt, duration_seconds=30)
                 out_path.write_bytes(audio)
             except Exception as e:  # noqa: BLE001
-                print(f"  Music {scene_id} failed: {e}")
+                _tprint(f"  Music {scene_id} failed: {e}")
         exp.log_prompt(
             target=f"music/{scene_id}.wav",
             model="stable-audio-2.5",
-            prompt=prompt,
+            prompt=music_prompt,
             stage="music",
             scene=scene_id,
             duration_seconds=30,
         )
+
+    _tprint(f"  Generating {len(script['scenes'])} music cue(s) "
+            f"({'parallel' if MAX_WORKERS > 1 else 'serial'})...")
+    _parallel_run("music", script["scenes"], _do_music)
 
 
 # ============================================================================
@@ -1139,58 +1234,71 @@ def build_first_frames(exp: Experiment, script: dict, cast: list[dict],
     loc_by_scene = {sid: l for l in locations for sid in l.get("scene_ids", [])}
 
     manifest: dict[str, dict[str, str]] = {}
+
+    # Collect all (scene, shot) work items — each is independent.
+    work_items = []
     for scene in script["scenes"]:
         scene_id = scene["id"]
         manifest.setdefault(scene_id, {})
         chars = [char_by_id[c] for c in scene.get("characters", []) if c in char_by_id]
         actors = [actor_by_char.get(c["id"], c["name"]) for c in chars]
-
         for shot in storyboard.get(scene_id, []):
-            shot_id = shot["shot_id"]
-            out_path = exp.path(f"frames/{scene_id}/{shot_id}.png")
-            if out_path.exists():
-                manifest[scene_id][shot_id] = str(out_path)
-                continue
+            work_items.append((scene, shot, chars, actors))
 
-            prompt = first_frame_prompt(lookbook, shot, scene, chars, actors,
-                                         loc_by_scene.get(scene_id))
-            try:
-                composition = gpt_image(prompt, size="1792x1024", quality="high")
-                exp.log_prompt(
-                    target=f"frames/{scene_id}/{shot_id}.composition.png",
-                    model=GPT_IMAGE_MODEL,
-                    prompt=prompt,
-                    stage="first_frame_composition",
-                    scene=scene_id,
-                    shot=shot_id,
+    def _do_first_frame(item: tuple) -> tuple[str, str, str] | None:
+        scene, shot, chars, actors = item
+        scene_id = scene["id"]
+        shot_id  = shot["shot_id"]
+        out_path = exp.path(f"frames/{scene_id}/{shot_id}.png")
+        if out_path.exists():
+            return scene_id, shot_id, str(out_path)
+
+        ff_prompt = first_frame_prompt(
+            lookbook, shot, scene, chars, actors, loc_by_scene.get(scene_id)
+        )
+        try:
+            composition = gpt_image(ff_prompt, size="1792x1024", quality="high")
+            exp.log_prompt(
+                target=f"frames/{scene_id}/{shot_id}.composition.png",
+                model=GPT_IMAGE_MODEL,
+                prompt=ff_prompt,
+                stage="first_frame_composition",
+                scene=scene_id, shot=shot_id,
+            )
+            ref_imgs = []
+            for c in chars:
+                rp = exp.path(f"references/{c['id']}/{scene_id}.png")
+                if rp.exists():
+                    ref_imgs.append(rp.read_bytes())
+            if ref_imgs:
+                lock_prompt = (
+                    ff_prompt + "\n\nUse FIRST image as composition, then character "
+                    "identity refs. Preserve faces exactly."
                 )
-                # Lock with character refs from stage 4.
-                ref_imgs = []
-                for c in chars:
-                    rp = exp.path(f"references/{c['id']}/{scene_id}.png")
-                    if rp.exists():
-                        ref_imgs.append(rp.read_bytes())
-                if ref_imgs:
-                    lock_prompt = (
-                        prompt + "\n\nUse FIRST image as composition, then character "
-                        "identity refs. Preserve faces exactly."
-                    )
-                    final = nano_banana(lock_prompt, reference_images=[composition] + ref_imgs)
-                    exp.log_prompt(
-                        target=f"frames/{scene_id}/{shot_id}.png",
-                        model=NANO_BANANA_MODEL,
-                        prompt=lock_prompt,
-                        stage="first_frame_lock",
-                        scene=scene_id,
-                        shot=shot_id,
-                        n_reference_images=1 + len(ref_imgs),
-                    )
-                else:
-                    final = composition
-                out_path.write_bytes(final)
-                manifest[scene_id][shot_id] = str(out_path)
-            except Exception as e:  # noqa: BLE001
-                print(f"  First frame {scene_id}/{shot_id} failed: {e}")
+                final = nano_banana(lock_prompt, reference_images=[composition] + ref_imgs)
+                exp.log_prompt(
+                    target=f"frames/{scene_id}/{shot_id}.png",
+                    model=NANO_BANANA_MODEL,
+                    prompt=lock_prompt,
+                    stage="first_frame_lock",
+                    scene=scene_id, shot=shot_id,
+                    n_reference_images=1 + len(ref_imgs),
+                )
+            else:
+                final = composition
+            out_path.write_bytes(final)
+            return scene_id, shot_id, str(out_path)
+        except Exception as e:  # noqa: BLE001
+            _tprint(f"  First frame {scene_id}/{shot_id} failed: {e}")
+            return None
+
+    _tprint(f"  Generating {len(work_items)} first frame(s) "
+            f"({'parallel' if MAX_WORKERS > 1 else 'serial'}, "
+            f"MAX_WORKERS={MAX_WORKERS})...")
+    for result in _parallel_run("first_frame", work_items, _do_first_frame):
+        if result:
+            scene_id, shot_id, path = result
+            manifest[scene_id][shot_id] = path
 
     exp.write_json("frames_manifest.json", manifest)
     return manifest
@@ -1285,6 +1393,11 @@ def build_video(exp: Experiment, script: dict, cast: list[dict],
         exp.write_json("shot_plan.json", shot_plan)
 
     manifest: dict[str, dict[str, list[str]]] = {}
+
+    # Collect all (scene_id, shot, take_idx) work items — every combination
+    # is independent once first frames exist. Pre-populate the manifest
+    # with cached takes so _parallel_run workers don't need to write it.
+    work_items = []
     for scene_id, shots in storyboard.items():
         manifest.setdefault(scene_id, {})
         scene = scene_by_id[scene_id]
@@ -1298,50 +1411,66 @@ def build_video(exp: Experiment, script: dict, cast: list[dict],
             if not ff.exists():
                 continue
 
-            ref_imgs = []
-            for c in chars:
-                rp = exp.path(f"references/{c['id']}/{scene_id}.png")
-                if rp.exists():
-                    ref_imgs.append(rp.read_bytes())
-
-            # Look up routing for this shot.
-            route = shot_plan.get(scene_id, {}).get(shot_id)
-            if not route:
-                # Fallback: route on the fly.
-                route = route_shot(shot.get("duration_seconds", 8), tier=VEO_TIER)
-
+            ref_imgs = [
+                exp.path(f"references/{c['id']}/{scene_id}.png").read_bytes()
+                for c in chars
+                if exp.path(f"references/{c['id']}/{scene_id}.png").exists()
+            ]
+            route = shot_plan.get(scene_id, {}).get(shot_id) or route_shot(
+                shot.get("duration_seconds", 8), tier=VEO_TIER
+            )
             model_key = route["model_key"]
-            segments = route["segments"]
-            total_duration = sum(segments)
-            print(f"  {scene_id}/{shot_id}: routing → {model_key} "
-                  f"({total_duration}s, {len(segments)} segment{'s' if len(segments) > 1 else ''})")
+            total_dur  = sum(route["segments"])
+            _tprint(f"  {scene_id}/{shot_id}: routing → {model_key} "
+                    f"({total_dur}s, {len(route['segments'])} segment(s))")
 
             for take_idx in range(TAKES_PER_SHOT):
                 take_path = exp.path(f"clips/{scene_id}/{shot_id}/take_{take_idx + 1}.mp4")
-                prompt = veo_prompt(lookbook, shot, scene, chars, actors, take_idx)
-                exp.log_prompt(
-                    target=f"clips/{scene_id}/{shot_id}/take_{take_idx + 1}.mp4",
-                    model=route["model_id"],
-                    prompt=prompt,
-                    stage="video",
-                    scene=scene_id,
-                    shot=shot_id,
-                    take=take_idx + 1,
-                    duration_seconds=route["segments"][0],
-                    estimated_cost=route["estimated_cost"],
-                )
                 if take_path.exists():
                     manifest[scene_id][shot_id].append(str(take_path))
                     continue
-                try:
-                    video_bytes = _render_shot(
-                        route, prompt, ff.read_bytes(), ref_imgs,
-                        seed=1000 + take_idx * 137,
-                    )
-                    take_path.write_bytes(video_bytes)
-                    manifest[scene_id][shot_id].append(str(take_path))
-                except Exception as e:  # noqa: BLE001
-                    print(f"  Take {scene_id}/{shot_id}/{take_idx + 1} failed: {e}")
+                work_items.append((scene_id, shot, take_idx, ff, ref_imgs, route,
+                                   scene, chars, actors))
+
+    def _do_take(item: tuple) -> tuple[str, str, str] | None:
+        scene_id, shot, take_idx, ff, ref_imgs, route, scene, chars, actors = item
+        shot_id   = shot["shot_id"]
+        take_path = exp.path(f"clips/{scene_id}/{shot_id}/take_{take_idx + 1}.mp4")
+        vp = veo_prompt(lookbook, shot, scene, chars, actors, take_idx)
+        exp.log_prompt(
+            target=f"clips/{scene_id}/{shot_id}/take_{take_idx + 1}.mp4",
+            model=route["model_id"],
+            prompt=vp,
+            stage="video",
+            scene=scene_id, shot=shot_id, take=take_idx + 1,
+            duration_seconds=route["segments"][0],
+            estimated_cost=route["estimated_cost"],
+        )
+        try:
+            video_bytes = _render_shot(
+                route, vp, ff.read_bytes(), ref_imgs,
+                seed=1000 + take_idx * 137,
+            )
+            take_path.write_bytes(video_bytes)
+            _tprint(f"  ✓ take {scene_id}/{shot_id}/{take_idx + 1} "
+                    f"({len(video_bytes)//1024}kB)")
+            return scene_id, shot_id, str(take_path)
+        except Exception as e:  # noqa: BLE001
+            _tprint(f"  Take {scene_id}/{shot_id}/{take_idx + 1} failed: {e}")
+            return None
+
+    _tprint(f"  Generating {len(work_items)} take(s) "
+            f"({'parallel' if MAX_WORKERS > 1 else 'serial'}, "
+            f"MAX_WORKERS={MAX_WORKERS})...")
+    for result in _parallel_run("video_take", work_items, _do_take):
+        if result:
+            scene_id, shot_id, path = result
+            manifest[scene_id][shot_id].append(path)
+
+    # Sort takes within each shot into deterministic order.
+    for scene_id in manifest:
+        for shot_id in manifest[scene_id]:
+            manifest[scene_id][shot_id].sort()
 
     exp.write_json("clips_manifest.json", manifest)
     return manifest
