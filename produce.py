@@ -597,14 +597,14 @@ def _generate_video(
             "ltx-2-3-pro",
             lambda: ltx_video(prompt, first_frame,
                                duration_seconds=duration,
-                               resolution="720p", seed=seed,
+                               resolution="1080p", seed=seed,
                                model=LTX_PRO_MODEL),
         ))
         attempts.append((
             "ltx-2-3-fast",
             lambda: ltx_video(prompt, first_frame,
                                duration_seconds=duration,
-                               resolution="720p", seed=seed,
+                               resolution="1080p", seed=seed,
                                model=LTX_FAST_MODEL),
         ))
 

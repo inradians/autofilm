@@ -130,9 +130,8 @@ _LTX_DURATIONS: dict[str, list[int]] = {
     "ltx-2-pro":    [5, 9, 13, 17, 21],
     "ltx-2-fast":   [5, 9, 13, 17, 21],
 }
-# Valid resolutions for LTX API (width x height strings)
+# Valid resolutions for LTX API — minimum is 1080p, no 720p support
 _LTX_RESOLUTIONS: dict[str, str] = {
-    "720p":  "1280x720",
     "1080p": "1920x1080",
     "1440p": "2560x1440",
     "4k":    "3840x2160",
@@ -333,7 +332,7 @@ def ltx_video(
     # Snap to nearest valid duration for this model
     valid_durs = _LTX_DURATIONS.get(use_model, [6, 8, 10])
     duration   = min(valid_durs, key=lambda d: abs(d - duration_seconds))
-    res_str    = _LTX_RESOLUTIONS.get(resolution, "1280x720")
+    res_str    = _LTX_RESOLUTIONS.get(resolution, "1920x1080")  # default 1080p
 
     body: dict = {
         "prompt":         prompt[:5000],
@@ -1166,10 +1165,11 @@ def openai_image(
     size: str = "1536x1024",
     quality: str = "medium",
 ) -> bytes:
-    """GPT Image 2 via OpenAI API directly (not through Runway).
+    """GPT Image via OpenAI API directly (not through Runway).
 
-    Uses a separate OPENAI_API_KEY and billing account — independent of
-    Runway's daily task limits.
+    Model: gpt-image-1 (the available model on OpenAI's API without
+    special org verification). Uses a separate OPENAI_API_KEY and
+    billing account — independent of Runway's daily task limits.
 
     Sizes:  '1024x1024' (square), '1536x1024' (landscape), '1024x1536' (portrait)
     Quality: 'low' | 'medium' | 'high' | 'auto'
@@ -1185,7 +1185,7 @@ def openai_image(
             "Content-Type":  "application/json",
         },
         json={
-            "model":   "gpt-image-2",
+            "model":   "gpt-image-1",
             "prompt":  prompt[:32000],  # model supports long prompts
             "n":       1,
             "size":    size,
@@ -1433,7 +1433,7 @@ def flux_image(
     width: int = 1344,
     height: int = 768,
     model: str | None = None,
-    safety_tolerance: int = 6,
+    safety_tolerance: int = 2,
 ) -> bytes:
     """FLUX image generation via the Black Forest Labs API (api.bfl.ai).
 

@@ -249,7 +249,7 @@ def test_video_endpoints(only: set[str] | None) -> None:
         run_test(
             "google_veo",
             lambda: google_veo(TEST_VIDEO_PROMPT, first_frame=frame,
-                               duration_seconds=5, resolution="720p"),
+                               duration_seconds=8, resolution="720p"),
             required_key="GOOGLE_AI_API_KEY",
         )
 
@@ -257,7 +257,7 @@ def test_video_endpoints(only: set[str] | None) -> None:
         run_test(
             "ltx-2-3-pro",
             lambda: ltx_video(TEST_VIDEO_PROMPT, first_frame=frame,
-                               duration_seconds=6, resolution="720p",
+                               duration_seconds=6, resolution="1080p",
                                model=LTX_PRO_MODEL),
             required_key="LTX_API_KEY",
         )
@@ -266,7 +266,7 @@ def test_video_endpoints(only: set[str] | None) -> None:
         run_test(
             "ltx-2-3-fast",
             lambda: ltx_video(TEST_VIDEO_PROMPT, first_frame=frame,
-                               duration_seconds=6, resolution="720p",
+                               duration_seconds=6, resolution="1080p",
                                model=LTX_FAST_MODEL),
             required_key="LTX_API_KEY",
         )
