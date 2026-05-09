@@ -31,6 +31,8 @@ from typing import Any
 
 from prepare import (
     Experiment,
+    GEMINI_FLASH_MODEL,
+    GEN4_IMAGE_MODEL,
     GPT_IMAGE_MODEL,
     MAX_PLANNED_SHOT_SECONDS,
     MAX_SCENES,
@@ -49,6 +51,7 @@ from prepare import (
     nano_banana,
     plan_shot_durations,
     route_shot,
+    runway_image,
     stable_audio,
     veo,
     veo_final_model,
@@ -113,6 +116,15 @@ MUSIC_STYLE = (
 # (typically 10-20 tasks). Set to 1 to disable parallelism entirely
 # (useful for debugging; every print statement appears in order).
 MAX_WORKERS: int = int(os.getenv("MAX_WORKERS", "4"))
+
+# Model used for both steps of reference image generation (composition
+# and identity lock). Defaults to gemini_2.5_flash — it supports
+# reference images natively, is the fastest image model available, and
+# produces quality adequate for an identity anchor (references are never
+# shown directly; they feed the first-frame and shot generation stages).
+# Override with REFERENCE_IMAGE_MODEL=gemini_image3_pro for higher quality
+# at the cost of ~60% more latency and credits per reference image.
+REFERENCE_IMAGE_MODEL: str = os.getenv("REFERENCE_IMAGE_MODEL", GEMINI_FLASH_MODEL)
 
 # Thread-safe print — prevents interleaved output from parallel workers.
 _PRINT_LOCK = threading.Lock()
@@ -840,14 +852,16 @@ def _generate_reference_composition(
 ) -> bytes:
     """Generate a scene composition (step 1 of reference image pipeline).
 
-    Retry order:
-      1. gpt_image     + original prompt
-      2. gpt_image     + Claude-rephrased prompt
-      3. nano_banana   + rephrased prompt
-      4. nano_banana   + original prompt
+    Uses REFERENCE_IMAGE_MODEL (default: gemini_2.5_flash) — fast and
+    cheap enough that all cast members can be composed in parallel without
+    significant wall-clock cost. Composition quality only needs to be
+    adequate for identity locking; it is never shown directly.
 
-    Step 1 is text-only (no reference images); actor appearance is locked
-    in step 2 (_generate_reference_lock) via reference images.
+    Retry order:
+      1. gemini_flash   + original prompt
+      2. gemini_flash   + Claude-rephrased prompt
+      3. nano_banana    + rephrased prompt
+      4. nano_banana    + original prompt
     """
     rephrased: str | None = None
 
@@ -859,10 +873,14 @@ def _generate_reference_composition(
         return rephrased
 
     attempts = [
-        ("gpt_image",    lambda: gpt_image(prompt_text,      size="1792x1024", quality="high")),
-        ("gpt_image*",   lambda: gpt_image(get_rephrased(),  size="1792x1024", quality="high")),
-        ("nano_banana*", lambda: nano_banana(get_rephrased())),
-        ("nano_banana",  lambda: nano_banana(prompt_text)),
+        ("gemini_flash",
+         lambda: runway_image(prompt_text,     model=REFERENCE_IMAGE_MODEL)),
+        ("gemini_flash*",
+         lambda: runway_image(get_rephrased(), model=REFERENCE_IMAGE_MODEL)),
+        ("nano_banana*",
+         lambda: nano_banana(get_rephrased())),
+        ("nano_banana",
+         lambda: nano_banana(prompt_text)),
     ]
 
     last_exc: Exception | None = None
@@ -895,18 +913,22 @@ def _generate_reference_lock(
     Actor photos are passed as 'person_x' reference images so the model
     matches appearance without the celebrity name appearing in text.
 
+    Uses REFERENCE_IMAGE_MODEL (default: gemini_2.5_flash) as first
+    choice — it natively supports reference images and is significantly
+    faster than nano_banana (gemini_image3_pro) or gen4_image.
+
     Retry order (all attempts include all available reference images):
-      1. nano_banana   + original prompt
-      2. nano_banana   + Claude-rephrased prompt
-      3. runway_image  + rephrased prompt   (gen4_image, refs supported)
-      4. runway_image  + original prompt
-      5. veo → frame   + rephrased prompt   (last resort)
+      1. gemini_flash  + original prompt
+      2. gemini_flash  + Claude-rephrased prompt
+      3. nano_banana   + rephrased prompt
+      4. nano_banana   + original prompt
+      5. runway_image (gen4_image) + rephrased prompt
+      6. veo → frame   + rephrased prompt   (last resort)
     """
-    # Build refs payload: composition first, then person photos, then moodboard.
     refs = [composition] + actor_photos + moodboards
     ref_tags = (
         ["composition"]
-        + [f"person_x"] * len(actor_photos)
+        + ["person_x"] * len(actor_photos)
         + ["location"] * len(moodboards)
     )
 
@@ -927,16 +949,20 @@ def _generate_reference_lock(
         return rephrased
 
     attempts = [
-        ("nano_banana",
-         lambda: nano_banana(lock_prompt, reference_images=refs)),
-        ("nano_banana*",
-         lambda: nano_banana(get_rephrased_lock(), reference_images=refs)),
-        ("runway_image*",
+        ("gemini_flash",
+         lambda: runway_image(lock_prompt,
+                              reference_images=refs, reference_tags=ref_tags,
+                              model=REFERENCE_IMAGE_MODEL)),
+        ("gemini_flash*",
          lambda: runway_image(get_rephrased_lock(),
                               reference_images=refs, reference_tags=ref_tags,
-                              model=GEN4_IMAGE_MODEL)),
-        ("runway_image",
-         lambda: runway_image(lock_prompt,
+                              model=REFERENCE_IMAGE_MODEL)),
+        ("nano_banana*",
+         lambda: nano_banana(get_rephrased_lock(), reference_images=refs)),
+        ("nano_banana",
+         lambda: nano_banana(lock_prompt, reference_images=refs)),
+        ("runway_image*",
+         lambda: runway_image(get_rephrased_lock(),
                               reference_images=refs, reference_tags=ref_tags,
                               model=GEN4_IMAGE_MODEL)),
         ("veo→frame*",
