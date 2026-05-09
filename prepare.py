@@ -2140,6 +2140,35 @@ def extract_video_frame(video_path: Path, at_seconds: float = 1.0) -> bytes:
     return result.stdout
 
 
+def extract_last_video_frame(video_path: Path) -> bytes:
+    """Pull the FINAL frame of a video as PNG bytes.
+
+    Used as STYLE / mood / lighting context for the next shot's first-
+    frame generation, so consecutive shots in a scene look visually
+    continuous even when different video models render them. Different
+    models (Veo, SeedDance, LTX) have somewhat different "looks" — a
+    color grade, a film-stock feel, a noise profile — and threading the
+    previous shot's tail frame through the still-image model that
+    creates the next shot's start frame keeps the look stable.
+
+    Implementation: ffmpeg's -sseof seeks from end-of-file. We grab the
+    frame ~0.04s before the end (one frame at 24fps), which avoids
+    catching a black/empty frame that some encoders pad on.
+    """
+    result = subprocess.run(
+        [
+            "ffmpeg", "-y", "-loglevel", "error",
+            "-sseof", "-0.05",                    # seek 50ms before end
+            "-i", str(video_path),
+            "-update", "1",                       # overwrite single output frame
+            "-frames:v", "1", "-f", "image2", "-vcodec", "png",
+            "pipe:1",
+        ],
+        capture_output=True, check=True,
+    )
+    return result.stdout
+
+
 # ============================================================================
 # SHOT ROUTING — pick the right video model + duration for each shot
 # ============================================================================

@@ -61,6 +61,7 @@ from prepare import (
     claude_tool,
     elevenlabs_sfx,
     extract_video_frame,
+    extract_last_video_frame,
     encode_image_for_claude,
     ffmpeg,
     flux_image,
@@ -1984,7 +1985,7 @@ def build_video(exp: Experiment, script: dict, cast: list[dict],
         chars = [char_by_id[c] for c in scene.get("characters", []) if c in char_by_id]
         actors = [actor_by_char.get(c["id"], c["name"]) for c in chars]
 
-        for shot in shots:
+        for shot_idx, shot in enumerate(shots):
             shot_id = shot["shot_id"]
             manifest[scene_id].setdefault(shot_id, [])
             ff = exp.path(f"frames/{scene_id}/{shot_id}.png")
@@ -2004,19 +2005,47 @@ def build_video(exp: Experiment, script: dict, cast: list[dict],
             _tprint(f"  {scene_id}/{shot_id}: routing → {model_key} "
                     f"({total_dur}s, {len(route['segments'])} segment(s))")
 
+            # Continuity: tag each shot 2+ in a scene with the
+            # previous shot's id. _do_take will look up the previous
+            # take's tail frame and pass it as a style ref so cross-
+            # model renders stay visually coherent within a scene.
+            prev_shot_id = shots[shot_idx - 1]["shot_id"] if shot_idx > 0 else None
+
             for take_idx in range(TAKES_PER_SHOT):
                 take_path = exp.path(f"clips/{scene_id}/{shot_id}/take_{take_idx + 1}.mp4")
                 if take_path.exists():
                     manifest[scene_id][shot_id].append(str(take_path))
                     continue
                 work_items.append((scene_id, shot, take_idx, ff, ref_imgs, route,
-                                   scene, chars, actors))
+                                   scene, chars, actors, prev_shot_id))
 
     def _do_take(item: tuple) -> tuple[str, str, str] | None:
-        scene_id, shot, take_idx, ff, ref_imgs, route, scene, chars, actors = item
+        (scene_id, shot, take_idx, ff, ref_imgs, route,
+         scene, chars, actors, prev_shot_id) = item
         shot_id   = shot["shot_id"]
         take_path = exp.path(f"clips/{scene_id}/{shot_id}/take_{take_idx + 1}.mp4")
         vp = veo_prompt(lookbook, shot, scene, chars, actors, take_idx)
+
+        # Continuity refinement — STYLE/MOOD context, not content.
+        # When MAX_WORKERS_VIDEO=1 (the Runway-friendly default), work
+        # items are processed in submission order, so by the time we
+        # reach shot N+1 the previous shot's first take is already on
+        # disk. We grab its tail frame and prepend it to ref_imgs so
+        # whichever video model handles this shot has the prior shot's
+        # color, lighting, and grading as a style anchor. This is the
+        # crucial trick that keeps the look stable when shot N goes
+        # through Veo and shot N+1 falls back to LTX (or vice versa).
+        cont_status = ""
+        if prev_shot_id:
+            prev_video = exp.path(f"clips/{scene_id}/{prev_shot_id}/take_1.mp4")
+            if prev_video.exists():
+                try:
+                    last_frame = extract_last_video_frame(prev_video)
+                    ref_imgs = [last_frame] + ref_imgs
+                    cont_status = " (cont. from prev)"
+                except Exception:                                  # noqa: BLE001
+                    pass   # continuity is best-effort; fall through
+
         exp.log_prompt(
             target=f"clips/{scene_id}/{shot_id}/take_{take_idx + 1}.mp4",
             model=route["model_id"],
@@ -2038,7 +2067,7 @@ def build_video(exp: Experiment, script: dict, cast: list[dict],
             )
             take_path.write_bytes(video_bytes)
             _tprint(f"  ✓ take {scene_id}/{shot_id}/{take_idx + 1} "
-                    f"({len(video_bytes)//1024}kB)")
+                    f"({len(video_bytes)//1024}kB){cont_status}")
             return scene_id, shot_id, str(take_path)
         except Exception as e:  # noqa: BLE001
             if _is_daily_limit(e):

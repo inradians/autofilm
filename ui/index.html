@@ -208,6 +208,68 @@
     text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);
   }
 
+  /* Collapsible stage sections */
+  details.stage-section { margin-top: 14px; }
+  details.stage-section > summary {
+    cursor: pointer; list-style: none;
+    padding: 8px 12px; border-radius: 4px;
+    background: var(--panel); border: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    user-select: none;
+    transition: background 120ms;
+  }
+  details.stage-section > summary::-webkit-details-marker { display: none; }
+  details.stage-section > summary:hover { background: var(--panel2); }
+  details.stage-section > summary .label {
+    font-size: 11px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--muted);
+  }
+  details.stage-section[open] > summary .label { color: var(--ink); }
+  details.stage-section > summary .count {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 11px; color: var(--muted);
+  }
+  details.stage-section > summary::after {
+    content: "▸"; color: var(--muted); font-size: 11px;
+    margin-left: 8px; transition: transform 120ms;
+  }
+  details.stage-section[open] > summary::after { transform: rotate(90deg); }
+  details.stage-section > .body { padding: 12px 4px 4px; }
+
+  /* Audio waveform card — replaces the bare <audio> element */
+  .audio-row {
+    display: grid; grid-template-columns: 1fr; gap: 8px;
+    margin: 10px 0;
+  }
+  .audio-card {
+    background: #0a0b0e; border: 1px solid var(--border);
+    border-radius: 4px; padding: 10px 12px;
+    display: grid;
+    grid-template-columns: 200px 1fr auto;
+    gap: 14px; align-items: center;
+  }
+  .audio-card .name {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 11px; color: var(--ink);
+    word-break: break-all;
+  }
+  .audio-card canvas {
+    width: 100%; height: 48px; display: block;
+    background: var(--panel2); border-radius: 3px;
+  }
+  .audio-card audio {
+    height: 32px; width: 220px;
+  }
+  .audio-card audio::-webkit-media-controls-panel {
+    background: var(--panel2);
+  }
+  @media (max-width: 1200px) {
+    .audio-card {
+      grid-template-columns: 1fr; gap: 6px;
+    }
+    .audio-card audio { width: 100%; }
+  }
+
   .thumbs {
     display: grid; gap: 8px;
     grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
@@ -482,13 +544,128 @@ function makeThumb(book_slug, exp_id, relpath, caption, isVideo = false) {
   return wrap;
 }
 
-function makeStageSection(title) {
-  const s = document.createElement('div');
+function makeStageSection(title, count = null, open = false) {
+  // Use a <details> element for native browser collapse behavior so
+  // keyboard users get accessible toggle semantics for free.
+  const s = document.createElement('details');
   s.className = 'stage-section';
-  const h4 = document.createElement('h4');
-  h4.textContent = title;
-  s.appendChild(h4);
+  if (open) s.open = true;
+  const summary = document.createElement('summary');
+  const label = document.createElement('span');
+  label.className = 'label';
+  label.textContent = title;
+  summary.appendChild(label);
+  if (count != null) {
+    const c = document.createElement('span');
+    c.className = 'count';
+    c.textContent = `${count} item${count === 1 ? '' : 's'}`;
+    summary.appendChild(c);
+  }
+  s.appendChild(summary);
+  // Body container — callers append children to s.body, not s, so the
+  // collapse animation works correctly without including <summary>.
+  const body = document.createElement('div');
+  body.className = 'body';
+  s.appendChild(body);
+  s.body = body;   // attached for caller convenience
   return s;
+}
+
+// Decode an audio file and draw a normalized peak-bar waveform onto a
+// canvas. Lazy: only decodes when the canvas is first drawn (we trigger
+// it immediately per audio card, but a future enhancement could defer
+// until the section is opened).
+async function drawWaveform(canvas, url) {
+  // Idempotent — skip if we've already decoded this canvas.
+  if (canvas.dataset.drawn === '1') return;
+  canvas.dataset.drawn = '1';
+
+  // Match the canvas pixel buffer to its CSS size for sharp rendering.
+  const dpr = window.devicePixelRatio || 1;
+  const cssW = canvas.clientWidth || 600;
+  const cssH = canvas.clientHeight || 48;
+  canvas.width = Math.floor(cssW * dpr);
+  canvas.height = Math.floor(cssH * dpr);
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  // Placeholder while we decode — keeps the layout stable.
+  ctx.fillStyle = 'rgba(184, 92, 71, 0.25)';
+  ctx.fillRect(0, cssH / 2 - 1, cssW, 2);
+
+  let arrayBuffer;
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    arrayBuffer = await resp.arrayBuffer();
+  } catch (e) {
+    return;   // network or 404 — leave the placeholder line
+  }
+
+  let audioBuffer;
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    const ac = new AC();
+    audioBuffer = await ac.decodeAudioData(arrayBuffer);
+    // Best-effort close — some browsers don't auto-GC suspended contexts.
+    if (ac.close) ac.close();
+  } catch {
+    return;
+  }
+
+  // Mix to mono for visualization. Two channels averaged is fine.
+  const ch0 = audioBuffer.getChannelData(0);
+  const ch1 = audioBuffer.numberOfChannels > 1
+    ? audioBuffer.getChannelData(1) : null;
+  const N = ch0.length;
+
+  // Bucket the samples into one bar per pixel column. Use peak
+  // amplitude per bucket — visually clearer than RMS at small sizes.
+  const buckets = Math.max(1, Math.floor(cssW));
+  const samplesPerBucket = Math.max(1, Math.floor(N / buckets));
+  ctx.clearRect(0, 0, cssW, cssH);
+
+  const barWidth = cssW / buckets;
+  const mid = cssH / 2;
+  ctx.fillStyle = '#b85c47';   // accent
+
+  for (let i = 0; i < buckets; i++) {
+    let peak = 0;
+    const start = i * samplesPerBucket;
+    const end = Math.min(N, start + samplesPerBucket);
+    for (let j = start; j < end; j++) {
+      const v = ch1 ? (Math.abs(ch0[j]) + Math.abs(ch1[j])) / 2 : Math.abs(ch0[j]);
+      if (v > peak) peak = v;
+    }
+    const h = Math.max(1, peak * (cssH - 2));
+    ctx.fillRect(i * barWidth, mid - h / 2, Math.max(1, barWidth - 0.5), h);
+  }
+}
+
+function makeAudioCard(book_slug, exp_id, relpath, name) {
+  const url = artifactURL(book_slug, exp_id, relpath);
+  const card = document.createElement('div');
+  card.className = 'audio-card';
+
+  const nameEl = document.createElement('div');
+  nameEl.className = 'name';
+  nameEl.textContent = name;
+  card.appendChild(nameEl);
+
+  const canvas = document.createElement('canvas');
+  card.appendChild(canvas);
+
+  const audio = document.createElement('audio');
+  audio.src = url; audio.controls = true; audio.preload = 'metadata';
+  card.appendChild(audio);
+
+  // Defer drawing until the canvas is mounted (it needs clientWidth).
+  // Drawing happens once per card; if the parent <details> is closed
+  // when the card is rendered, clientWidth may be 0 — drawWaveform
+  // handles that with a fallback width and only decodes once.
+  requestAnimationFrame(() => drawWaveform(canvas, url));
+
+  return card;
 }
 
 function fmtUSD(v) {
@@ -642,86 +819,116 @@ function renderExperimentDetail(data, isLive = false) {
   const slug = data.book_slug;
   const eid  = data.exp_id;
 
-  // Lookbook style frame
+  // Lookbook style frame — open by default (it's the master reference)
   if (st.lookbook && st.lookbook.style_frame) {
-    const s = makeStageSection('lookbook style frame');
+    const s = makeStageSection('lookbook style frame', 1, true);
     const grid = document.createElement('div');
     grid.className = 'thumbs';
     grid.appendChild(makeThumb(slug, eid, st.lookbook.style_frame, 'style_frame'));
-    s.appendChild(grid);
+    s.body.appendChild(grid);
     container.appendChild(s);
   }
 
-  // Character refs
+  // Character refs — collapsed by default
   if (st.references && st.references.by_scene_char) {
     const refs = st.references.by_scene_char;
     const keys = Object.keys(refs);
     if (keys.length) {
-      const s = makeStageSection(`character references (${keys.length})`);
+      const s = makeStageSection('character references', keys.length);
       const grid = document.createElement('div');
       grid.className = 'thumbs';
       for (const k of keys.slice(0, 24))
         grid.appendChild(makeThumb(slug, eid, refs[k], k));
-      s.appendChild(grid);
+      s.body.appendChild(grid);
       container.appendChild(s);
     }
   }
 
-  // Location moodboards
+  // Location moodboards — collapsed by default
   if (st.locations && st.locations.moodboards) {
     const mbs = st.locations.moodboards;
     const keys = Object.keys(mbs);
     if (keys.length) {
-      const s = makeStageSection(`location moodboards (${keys.length})`);
+      const s = makeStageSection('location moodboards', keys.length);
       const grid = document.createElement('div');
       grid.className = 'thumbs';
       for (const k of keys)
         grid.appendChild(makeThumb(slug, eid, mbs[k], k));
-      s.appendChild(grid);
+      s.body.appendChild(grid);
       container.appendChild(s);
     }
   }
 
-  // First frames
+  // Music cues — collapsed by default. Waveform thumbnail per cue.
+  if (st.music && st.music.by_scene) {
+    const m = st.music.by_scene;
+    const keys = Object.keys(m);
+    if (keys.length) {
+      const s = makeStageSection('music cues', keys.length);
+      const wrap = document.createElement('div');
+      wrap.className = 'audio-row';
+      for (const k of keys)
+        wrap.appendChild(makeAudioCard(slug, eid, m[k], k));
+      s.body.appendChild(wrap);
+      container.appendChild(s);
+    }
+  }
+
+  // Narration — collapsed by default. Same waveform treatment.
+  if (st.narration && st.narration.by_scene) {
+    const n = st.narration.by_scene;
+    const keys = Object.keys(n);
+    if (keys.length) {
+      const s = makeStageSection('narration', keys.length);
+      const wrap = document.createElement('div');
+      wrap.className = 'audio-row';
+      for (const k of keys)
+        wrap.appendChild(makeAudioCard(slug, eid, n[k], k));
+      s.body.appendChild(wrap);
+      container.appendChild(s);
+    }
+  }
+
+  // First frames — collapsed (lots of items)
   if (st.frames && st.frames.by_scene_shot) {
     const fr = st.frames.by_scene_shot;
     const keys = Object.keys(fr);
     if (keys.length) {
-      const s = makeStageSection(`first frames (${keys.length})`);
+      const s = makeStageSection('first frames', keys.length);
       const grid = document.createElement('div');
       grid.className = 'thumbs';
       for (const k of keys.slice(0, 48))
         grid.appendChild(makeThumb(slug, eid, fr[k], k));
-      s.appendChild(grid);
+      s.body.appendChild(grid);
       container.appendChild(s);
     }
   }
 
-  // Takes
+  // Takes — collapsed
   if (st.clips && st.clips.by_scene_shot_take) {
     const cl = st.clips.by_scene_shot_take;
     const keys = Object.keys(cl);
     if (keys.length) {
-      const s = makeStageSection(`takes (${keys.length})`);
+      const s = makeStageSection('takes', keys.length);
       const grid = document.createElement('div');
       grid.className = 'thumbs video';
       for (const k of keys.slice(0, 24))
         grid.appendChild(makeThumb(slug, eid, cl[k], k, true));
-      s.appendChild(grid);
+      s.body.appendChild(grid);
       container.appendChild(s);
     }
   }
 
-  // Final
+  // Final — open by default (the deliverable)
   if (st.final && st.final.path) {
-    const s = makeStageSection('final.mp4');
+    const s = makeStageSection('final.mp4', null, true);
     const wrap = document.createElement('div');
     wrap.className = 'thumb final-mp4';
     const v = document.createElement('video');
     v.src = artifactURL(slug, eid, st.final.path);
     v.controls = true; v.preload = 'metadata';
     wrap.appendChild(v);
-    s.appendChild(wrap);
+    s.body.appendChild(wrap);
     container.appendChild(s);
   }
 
