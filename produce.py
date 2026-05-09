@@ -1094,11 +1094,28 @@ def build_first_frames(exp: Experiment, script: dict, cast: list[dict],
         if out_path.exists():
             return scene_id, shot_id, str(out_path)
 
-        # first_frame_prompt already includes actor names
-        # ("played by Jeff Goldblum") — FLUX handles these reliably.
+        # Full prompt for gpt_image (no character limit).
         ff_prompt = first_frame_prompt(
             lookbook, shot, scene, chars, actors, loc_by_scene.get(scene_id)
         )
+
+        # Compact prompt for nano_banana — Runway rejects promptText >1000
+        # chars. The full ff_prompt can far exceed this (style_preamble +
+        # location description + per-character descriptions).
+        char_summary = "; ".join(c["name"] for c in chars) or "no characters"
+        nano_prompt = (
+            f"Photorealistic cinematic film still. "
+            f"{', '.join(lookbook.get('style_keywords', []))[:80]}. "
+            f"Anamorphic 16:9.\n"
+            f"SHOT: {shot.get('shot_size', '')} {shot.get('angle', '')} "
+            f"angle, {shot.get('lens_mm', 35)}mm.\n"
+            f"LOCATION: {scene['location'][:80]}, "
+            f"{scene.get('time_of_day', 'day')}.\n"
+            f"CHARACTERS: {char_summary[:120]}\n"
+            f"ACTION: {shot.get('action', '')[:150]}\n"
+            f"MOOD: {scene.get('mood', '')[:60]}\n"
+            f"NEGATIVE: no text, no logos, no watermarks."
+        )[:950]
 
         # ── Step 1: Compose the frame ─────────────────────────────────
         composition: bytes | None = None
@@ -1106,7 +1123,7 @@ def build_first_frames(exp: Experiment, script: dict, cast: list[dict],
         for label, fn in [
             ("gpt_image",   lambda: gpt_image(ff_prompt, size="1792x1024", quality="high")),
             ("gpt_image*",  lambda: gpt_image(_rephrase_prompt(ff_prompt), size="1792x1024", quality="standard")),
-            ("nano_banana", lambda: nano_banana(ff_prompt)),
+            ("nano_banana", lambda: nano_banana(nano_prompt)),
         ]:
             try:
                 _tprint(f"    [{label}] frame {scene_id}/{shot_id}")
@@ -1137,10 +1154,11 @@ def build_first_frames(exp: Experiment, script: dict, cast: list[dict],
 
         try:
             if ref_imgs:
+                # Lock prompt also uses nano_prompt base — must stay <1000 chars.
                 lock_prompt = (
-                    ff_prompt + "\n\nUse FIRST image as composition framing, "
+                    nano_prompt + "\n\nUse FIRST image as composition framing, "
                     "then character identity refs. Preserve faces exactly."
-                )
+                )[:950]
                 final = nano_banana(lock_prompt, reference_images=[composition] + ref_imgs)
                 exp.log_prompt(
                     target=f"frames/{scene_id}/{shot_id}.png",
