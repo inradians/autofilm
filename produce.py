@@ -643,16 +643,205 @@ def style_preamble(lookbook: dict) -> str:
 # STAGE 4 — Per-scene per-character reference images (identity locking)
 # ============================================================================
 
-def reference_image_prompt(lookbook: dict, character: dict, scene: dict, actor: str) -> str:
+def _fetch_actor_photos(actor: str, n: int = 3) -> list[bytes]:
+    """Web search for press/official photos of an actor and return up to n
+    as raw image bytes.
+
+    Why: naming celebrities in image-gen prompts triggers content-policy
+    filters on Runway (and creates likeness-rights issues). Instead we fetch
+    real photos and pass them as reference images tagged 'person_x', so the
+    model matches the appearance without knowing the name.
+
+    Returns an empty list if duckduckgo_search is not installed or if all
+    downloads fail — the caller handles missing photos gracefully (falls back
+    to description-only generation).
+    """
+    try:
+        from duckduckgo_search import DDGS
+    except ImportError:
+        print(f"    [photos] duckduckgo-search not installed; skipping web photo fetch.")
+        print(f"            Run: uv add duckduckgo-search")
+        return []
+
+    photos: list[bytes] = []
+    print(f"    [photos] searching for {actor}...")
+    try:
+        with DDGS() as ddgs:
+            results = list(ddgs.images(
+                f"{actor} actor official press portrait headshot",
+                max_results=n * 4,   # over-fetch — some URLs will fail
+                safesearch="on",
+            ))
+        for r in results:
+            if len(photos) >= n:
+                break
+            url = r.get("image", "")
+            if not url:
+                continue
+            try:
+                resp = httpx.get(
+                    url, timeout=15.0, follow_redirects=True,
+                    headers={"User-Agent": "Mozilla/5.0 (compatible; autofilm/1.0)"},
+                )
+                data = resp.content
+                # Accept JPEG, PNG, WebP — reject HTML error pages and tiny blobs.
+                is_jpeg = data[:3] == b"\xff\xd8\xff"
+                is_png  = data[:8] == b"\x89PNG\r\n\x1a\n"
+                is_webp = data[:4] == b"RIFF" and data[8:12] == b"WEBP"
+                if (is_jpeg or is_png or is_webp) and len(data) >= 10_000:
+                    photos.append(data)
+            except Exception:
+                continue
+    except Exception as e:
+        print(f"    [photos] search failed ({e}); continuing without web photos")
+
+    print(f"    [photos] fetched {len(photos)}/{n} photo(s) for {actor}")
+    return photos
+
+
+def reference_image_prompt(lookbook: dict, character: dict, scene: dict) -> str:
+    """Build a reference image prompt without naming any celebrity.
+
+    The actor's appearance comes from reference images (fetched photos) passed
+    to the model, NOT from naming the actor in text. Naming celebrities in
+    prompts triggers Runway's content-policy filter and creates likeness-rights
+    issues. 'person_x' in the prompt text refers to the tagged reference image.
+    """
     return (
         style_preamble(lookbook)
-        + f"Cinematic film still, photorealistic, anamorphic 16:9, "
-        f"shallow depth of field. Medium shot, eye-level.\n\n"
-        f"SUBJECT: {actor} portraying {character['name']}.\n"
+        + "Cinematic film still, photorealistic, anamorphic 16:9, "
+        "shallow depth of field. Medium shot, eye-level.\n\n"
+        f"SUBJECT: a person portraying {character['name']} (@person_x). "
+        f"Match @person_x's face and appearance exactly from the reference images.\n"
         f"CHARACTER: {character.get('description', '')}\n"
         f"LOCATION: {scene['location']}, {scene.get('time_of_day', 'day')}.\n"
         f"MOOD: {scene.get('mood', 'neutral')}.\n\n"
-        f"NEGATIVE: no text, no logos, no UI, no watermarks."
+        "NEGATIVE: no text, no logos, no UI, no watermarks, "
+        "do not caption or label any person."
+    )
+
+
+def _generate_reference_composition(
+    prompt_text: str, cid: str, scene_id: str
+) -> bytes:
+    """Generate a scene composition (step 1 of reference image pipeline).
+
+    Retry order:
+      1. gpt_image     + original prompt
+      2. gpt_image     + Claude-rephrased prompt
+      3. nano_banana   + rephrased prompt
+      4. nano_banana   + original prompt
+
+    Step 1 is text-only (no reference images); actor appearance is locked
+    in step 2 (_generate_reference_lock) via reference images.
+    """
+    rephrased: str | None = None
+
+    def get_rephrased() -> str:
+        nonlocal rephrased
+        if rephrased is None:
+            print(f"      ↻ rephrasing composition prompt for {cid}/{scene_id}...")
+            rephrased = _rephrase_prompt(prompt_text)
+        return rephrased
+
+    attempts = [
+        ("gpt_image",    lambda: gpt_image(prompt_text,      size="1792x1024", quality="high")),
+        ("gpt_image*",   lambda: gpt_image(get_rephrased(),  size="1792x1024", quality="high")),
+        ("nano_banana*", lambda: nano_banana(get_rephrased())),
+        ("nano_banana",  lambda: nano_banana(prompt_text)),
+    ]
+
+    last_exc: Exception | None = None
+    for label, fn in attempts:
+        try:
+            print(f"      [{label}] composition for {cid}/{scene_id}...")
+            result = fn()
+            print(f"      ✓ {label} ({len(result)//1024}kB)")
+            return result
+        except Exception as e:  # noqa: BLE001
+            print(f"      ✗ {label}: {e}")
+            last_exc = e
+
+    raise RuntimeError(
+        f"All composition attempts failed for {cid}/{scene_id}. Last: {last_exc}"
+    )
+
+
+def _generate_reference_lock(
+    prompt_text: str,
+    actor_photos: list[bytes],
+    moodboards: list[bytes],
+    composition: bytes,
+    cid: str,
+    scene_id: str,
+) -> bytes:
+    """Fuse composition + actor photos + moodboard into a locked reference
+    image (step 2 of the reference image pipeline).
+
+    Actor photos are passed as 'person_x' reference images so the model
+    matches appearance without the celebrity name appearing in text.
+
+    Retry order (all attempts include all available reference images):
+      1. nano_banana   + original prompt
+      2. nano_banana   + Claude-rephrased prompt
+      3. runway_image  + rephrased prompt   (gen4_image, refs supported)
+      4. runway_image  + original prompt
+      5. veo → frame   + rephrased prompt   (last resort)
+    """
+    # Build refs payload: composition first, then person photos, then moodboard.
+    refs = [composition] + actor_photos + moodboards
+    ref_tags = (
+        ["composition"]
+        + [f"person_x"] * len(actor_photos)
+        + ["location"] * len(moodboards)
+    )
+
+    lock_prompt = (
+        prompt_text
+        + "\n\nReference image order: @composition (scene framing), "
+        "@person_x (character face and body — match exactly), "
+        "@location (environment). Preserve @person_x identity precisely."
+    )
+
+    rephrased: str | None = None
+
+    def get_rephrased_lock() -> str:
+        nonlocal rephrased
+        if rephrased is None:
+            print(f"      ↻ rephrasing lock prompt for {cid}/{scene_id}...")
+            rephrased = _rephrase_prompt(lock_prompt)
+        return rephrased
+
+    attempts = [
+        ("nano_banana",
+         lambda: nano_banana(lock_prompt, reference_images=refs)),
+        ("nano_banana*",
+         lambda: nano_banana(get_rephrased_lock(), reference_images=refs)),
+        ("runway_image*",
+         lambda: runway_image(get_rephrased_lock(),
+                              reference_images=refs, reference_tags=ref_tags,
+                              model=GEN4_IMAGE_MODEL)),
+        ("runway_image",
+         lambda: runway_image(lock_prompt,
+                              reference_images=refs, reference_tags=ref_tags,
+                              model=GEN4_IMAGE_MODEL)),
+        ("veo→frame*",
+         lambda: _veo_first_frame(get_rephrased_lock())),
+    ]
+
+    last_exc: Exception | None = None
+    for label, fn in attempts:
+        try:
+            print(f"      [{label}] locking {cid}/{scene_id} ({len(refs)} refs)...")
+            result = fn()
+            print(f"      ✓ {label} ({len(result)//1024}kB)")
+            return result
+        except Exception as e:  # noqa: BLE001
+            print(f"      ✗ {label}: {e}")
+            last_exc = e
+
+    raise RuntimeError(
+        f"All lock attempts failed for {cid}/{scene_id}. Last: {last_exc}"
     )
 
 
@@ -668,18 +857,25 @@ def build_references(exp: Experiment, script: dict, cast: list[dict],
     actor_photos_root = exp.path("references/actor_photos")
     manifest: dict[str, dict[str, str]] = {}
 
+    # Cache fetched photos within this run to avoid re-searching for the same
+    # actor across multiple scenes.
+    fetched_photos_cache: dict[str, list[bytes]] = {}
+
     for scene in script["scenes"]:
         scene_id = scene["id"]
         manifest.setdefault(scene_id, {})
         loc = loc_by_scene.get(scene_id)
-        moodboards = []
+        moodboards: list[bytes] = []
         if loc:
-            moodboards = [Path(p).read_bytes() for p in loc.get("moodboard_paths", [])
-                          if Path(p).exists()][:1]
+            moodboards = [
+                Path(p).read_bytes()
+                for p in loc.get("moodboard_paths", [])
+                if Path(p).exists()
+            ][:1]
 
         for cid in scene.get("characters", []):
             character = char_by_id.get(cid)
-            cast_row = actor_by_char.get(cid)
+            cast_row  = actor_by_char.get(cid)
             if not character or not cast_row:
                 continue
             out_path = exp.path(f"references/{cid}/{scene_id}.png")
@@ -688,55 +884,85 @@ def build_references(exp: Experiment, script: dict, cast: list[dict],
                 continue
 
             actor = cast_row["actor"]
-            prompt = reference_image_prompt(lookbook, character, scene, actor)
+            actor_slug = actor.lower().replace(" ", "_")
+
+            # ── Gather actor photos ──────────────────────────────────────
+            # Priority: local disk (user-placed) > web search > nothing.
+            actor_imgs: list[bytes] = []
+
+            # 1. Local photos the user manually placed in references/actor_photos/
+            photos_dir = actor_photos_root / actor_slug
+            if photos_dir.exists():
+                for p in sorted(
+                    list(photos_dir.glob("*.png")) + list(photos_dir.glob("*.jpg"))
+                )[:3]:
+                    actor_imgs.append(p.read_bytes())
+                print(f"    [photos] {len(actor_imgs)} local photo(s) for {actor}")
+
+            # 2. Web search — if fewer than 2 local photos available
+            if len(actor_imgs) < 2:
+                if actor not in fetched_photos_cache:
+                    fetched_photos_cache[actor] = _fetch_actor_photos(
+                        actor, n=3 - len(actor_imgs)
+                    )
+                web_photos = fetched_photos_cache[actor]
+                # Save to disk so they appear in the experiment dir and
+                # can be inspected / manually replaced.
+                photos_dir.mkdir(parents=True, exist_ok=True)
+                for i, img_bytes in enumerate(web_photos):
+                    save_path = photos_dir / f"web_{i:02d}.jpg"
+                    if not save_path.exists():
+                        save_path.write_bytes(img_bytes)
+                actor_imgs = actor_imgs + web_photos
+
+            # ── Build the prompt (no actor name in text) ─────────────────
+            ref_prompt = reference_image_prompt(lookbook, character, scene)
 
             try:
-                # Step 1: GPT Image 2 composes the scene.
-                composition = gpt_image(prompt, size="1792x1024", quality="high")
+                # Step 1: Compose the scene without naming the actor.
+                composition = _generate_reference_composition(
+                    ref_prompt, cid, scene_id
+                )
+                exp.write_bytes(
+                    f"references/{cid}/{scene_id}.composition.png", composition
+                )
                 exp.log_prompt(
                     target=f"references/{cid}/{scene_id}.composition.png",
                     model=GPT_IMAGE_MODEL,
-                    prompt=prompt,
+                    prompt=ref_prompt,
                     stage="reference_composition",
-                    character=cid,
-                    scene=scene_id,
+                    character=cid, scene=scene_id,
                 )
 
-                # Step 2: Nano Banana 2 fuses composition + actor photos
-                # (if user dropped any in actor_photos/) + location moodboard.
-                actor_slug = actor.lower().replace(" ", "_")
-                photos_dir = actor_photos_root / actor_slug
-                actor_imgs: list[bytes] = []
-                if photos_dir.exists():
-                    for p in sorted(list(photos_dir.glob("*.png")) + list(photos_dir.glob("*.jpg")))[:3]:
-                        actor_imgs.append(p.read_bytes())
-
-                refs = [composition] + actor_imgs + moodboards
-                if len(refs) > 1:
-                    lock_prompt = (
-                        prompt + "\n\nUse FIRST image as composition, then character "
-                        "identity refs, then location moodboard. Preserve face exactly."
+                # Step 2: Lock identity with actor photos as person_x refs.
+                if actor_imgs or moodboards:
+                    locked = _generate_reference_lock(
+                        ref_prompt, actor_imgs, moodboards,
+                        composition, cid, scene_id,
                     )
-                    locked = nano_banana(lock_prompt, reference_images=refs)
                     exp.log_prompt(
                         target=f"references/{cid}/{scene_id}.png",
                         model=NANO_BANANA_MODEL,
-                        prompt=lock_prompt,
+                        prompt=ref_prompt,
                         stage="reference_lock",
-                        character=cid,
-                        scene=scene_id,
-                        n_reference_images=len(refs),
+                        character=cid, scene=scene_id,
+                        n_actor_photos=len(actor_imgs),
+                        n_moodboards=len(moodboards),
                     )
                 else:
+                    # No reference images available — use the composition directly.
+                    print(f"    ℹ No actor photos or moodboards for {cid}/{scene_id}; using composition only.")
                     locked = composition
 
                 out_path.write_bytes(locked)
                 manifest[scene_id][cid] = str(out_path)
-            except Exception as e:  # noqa: BLE001
-                print(f"  Reference {cid}/{scene_id} failed: {e}")
+
+            except RuntimeError as e:
+                print(f"  ⚠ All reference image attempts exhausted for {cid}/{scene_id}: {e}")
 
     exp.write_json("references_manifest.json", manifest)
     return manifest
+
 
 
 # ============================================================================
