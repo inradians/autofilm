@@ -1415,91 +1415,98 @@ def stable_audio(prompt: str, duration_seconds: int = 30) -> bytes:
     return resp.content
 
 
-# FLUX model strings. flux-pro-1.1 is the fastest high-quality option;
-# flux-dev is cheaper (~half cost) and suitable for reference images.
-FLUX_PRO_MODEL = "flux-pro-1.1"
-FLUX_DEV_MODEL = "flux-dev"
-FLUX_ULTRA_MODEL = "flux-pro-1.1-ultra"   # highest quality, 2× cost of pro
+# FLUX model strings.
+# flux-2-pro-preview — latest FLUX.2, multi-reference editing (up to 8 refs)
+# flux-pro-1.1       — fast text-to-image, no reference support
+# flux-pro-1.1-ultra — highest quality text-to-image
+# flux-dev            — cheaper, open weights
+FLUX2_PRO_MODEL  = "flux-2-pro-preview"   # multi-reference, image editing
+FLUX_PRO_MODEL   = "flux-pro-1.1"
+FLUX_ULTRA_MODEL = "flux-pro-1.1-ultra"
+FLUX_DEV_MODEL   = "flux-dev"
+BFL_API_BASE     = "https://api.bfl.ai"   # global endpoint (was api.bfl.ml)
 
 
 def flux_image(
     prompt: str,
+    reference_images: list[bytes] | None = None,
     width: int = 1344,
     height: int = 768,
-    model: str = FLUX_PRO_MODEL,
-    safety_tolerance: int = 6,   # 0=strict … 6=permissive; celebrities need ≥4
+    model: str | None = None,
+    safety_tolerance: int = 6,
 ) -> bytes:
-    """FLUX.1 image generation via the Black Forest Labs API.
+    """FLUX image generation via the Black Forest Labs API (api.bfl.ai).
 
-    FLUX is the only T2I model that reliably generates celebrities from
-    text prompts: its training data explicitly includes public figures,
-    so name-based prompts produce accurate likenesses. This is the
-    primary reason to use it over the Runway image models for reference
-    image generation.
+    Routes to the best model based on inputs:
+      - reference_images provided → flux-2-pro-preview (FLUX.2)
+        Accepts up to 8 reference images via input_image, input_image_2, …
+        Excellent for character consistency and multi-ref composition.
+      - no references → flux-pro-1.1 (fast, text-to-image only)
 
-    Async workflow (matches BFL's API contract):
-      1. POST to /v1/{model} → get a request ID
-      2. Poll /v1/get_result?id=… until status == "Ready"
-      3. Download the image from result["sample"]
+    Async workflow:
+      1. POST /v1/{model} → {id, polling_url}
+      2. Poll polling_url until status == "Ready"
+      3. Download result["sample"] (signed URL, valid 10 min)
 
-    Args:
-        prompt:           Image generation prompt. Including the celebrity
-                          name directly ("Jeff Goldblum as Dr. Malcolm")
-                          works reliably — FLUX handles named public figures.
-        width / height:   Output size. Must be multiples of 32.
-                          Default 1344×768 ≈ 16:9 at 720p-class quality.
-        model:            BFL model string. FLUX_PRO_MODEL is fastest;
-                          FLUX_ULTRA_MODEL is highest quality.
-        safety_tolerance: 0–6. Set to ≥4 for celebrity prompts so the
-                          filter doesn't block realistic-looking results.
-
-    Requires BFL_API_KEY in environment / .env. Get a key at
-    https://api.bfl.ml/ — pay-as-you-go, no monthly commitment.
-    ~$0.05/image (Pro) or ~$0.025/image (Dev).
+    Requires BFL_API_KEY. ~$0.05/image (Pro) or ~$0.025/image (Dev).
     """
+    import base64 as _b64
     api_key = _require_key("BFL_API_KEY")
-    headers = {"X-Key": api_key, "Content-Type": "application/json"}
+    headers = {"x-key": api_key, "Content-Type": "application/json"}
 
-    # Submit generation job.
+    # Choose model: FLUX.2 when refs are provided, Pro for text-only
+    use_model = model or (FLUX2_PRO_MODEL if reference_images else FLUX_PRO_MODEL)
+
+    body: dict = {
+        "prompt":           prompt,
+        "width":            width,
+        "height":           height,
+        "safety_tolerance": safety_tolerance,
+        "output_format":    "jpeg",
+    }
+
+    # Pass reference images as input_image, input_image_2, ... input_image_8
+    if reference_images:
+        for i, ref in enumerate(reference_images[:8]):
+            key = "input_image" if i == 0 else f"input_image_{i + 1}"
+            body[key] = _b64.b64encode(ref).decode()
+
     submit = httpx.post(
-        f"https://api.bfl.ml/v1/{model}",
+        f"{BFL_API_BASE}/v1/{use_model}",
         headers=headers,
-        json={
-            "prompt": prompt,
-            "width": width,
-            "height": height,
-            "safety_tolerance": safety_tolerance,
-            "output_format": "jpeg",
-        },
+        json=body,
         timeout=30.0,
     )
-    submit.raise_for_status()
-    request_id: str = submit.json()["id"]
+    if not submit.is_success:
+        try:
+            detail = submit.json()
+        except Exception:
+            detail = submit.text[:400]
+        raise RuntimeError(f"FLUX submit {submit.status_code}: {detail}")
 
-    # Poll until ready (BFL jobs typically complete in 10–30 seconds).
-    for _ in range(240):          # up to 120 seconds
+    result_data   = submit.json()
+    polling_url: str = result_data.get("polling_url") or (
+        f"{BFL_API_BASE}/v1/get_result?id={result_data['id']}"
+    )
+
+    # Poll until ready (FLUX.2 typically 15-60 s, Pro ~10-30 s)
+    for _ in range(240):
         time.sleep(0.5)
-        poll = httpx.get(
-            "https://api.bfl.ml/v1/get_result",
-            params={"id": request_id},
-            headers=headers,
-            timeout=30.0,
-        )
+        poll = httpx.get(polling_url, headers=headers, timeout=30.0)
         poll.raise_for_status()
-        data = poll.json()
+        data   = poll.json()
         status = data.get("status", "")
         if status == "Ready":
             image_url: str = data["result"]["sample"]
             return httpx.get(image_url, timeout=60.0).content
         if status in ("Error", "Failed", "Request Moderated", "Content Moderated"):
             raise RuntimeError(
-                f"FLUX ({model}) generation failed: status={status!r}  "
-                f"id={request_id}"
+                f"FLUX ({use_model}) failed: status={status!r} "
+                f"id={result_data.get('id')}"
             )
-        # status is "Pending" or "Processing" — keep polling.
 
     raise RuntimeError(
-        f"FLUX ({model}) timed out after 120 seconds. id={request_id}"
+        f"FLUX ({use_model}) timed out. id={result_data.get('id')}"
     )
 
 
