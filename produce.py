@@ -32,6 +32,8 @@ from typing import Any
 
 from prepare import (
     Experiment,
+    FLUX_DEV_MODEL,
+    FLUX_PRO_MODEL,
     GEMINI_FLASH_MODEL,
     GEN4_IMAGE_MODEL,
     GOOGLE_IMAGE_MODEL,
@@ -56,6 +58,7 @@ from prepare import (
     elevenlabs_sfx,
     extract_video_frame,
     ffmpeg,
+    flux_image,
     google_imagen,
     google_veo,
     gpt_image,
@@ -693,6 +696,17 @@ def _generate_image(
         attempts.append((
             "reve_create",
             lambda: reve_image(prompt, aspect_ratio="16:9"),
+        ))
+
+    # BFL FLUX — last resort. Pro first, Dev as final fallback.
+    if os.environ.get("BFL_API_KEY"):
+        attempts.append((
+            "flux-pro",
+            lambda: flux_image(prompt, model=FLUX_PRO_MODEL),
+        ))
+        attempts.append((
+            "flux-dev",
+            lambda: flux_image(prompt, model=FLUX_DEV_MODEL),
         ))
 
     last_exc: Exception | None = None
