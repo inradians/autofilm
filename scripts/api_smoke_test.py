@@ -143,6 +143,7 @@ def run_test(
 def test_image_endpoints(only: set[str] | None) -> None:
     from prepare import (
         flux_image,
+        google_nano_banana,
         gpt_image,
         nano_banana,
         openai_image,
@@ -176,6 +177,14 @@ def test_image_endpoints(only: set[str] | None) -> None:
             "nano_banana",
             lambda: nano_banana(TEST_PROMPT[:950], reference_images=[frame]),
             required_key="RUNWAYML_API_SECRET",
+        )
+
+    if want("google_nano_banana"):
+        run_test(
+            "google_nano_banana",
+            lambda: google_nano_banana(TEST_PROMPT[:950],
+                                       reference_images=[frame]),
+            required_key="GOOGLE_AI_API_KEY",
         )
 
     if want("reve_create"):
@@ -275,7 +284,7 @@ def test_video_endpoints(only: set[str] | None) -> None:
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 ALL_IMAGE = {
-    "gpt_image", "openai_image", "nano_banana",
+    "gpt_image", "openai_image", "nano_banana", "google_nano_banana",
     "reve_create", "reve_remix", "flux-pro", "flux-2-pro",
 }
 ALL_VIDEO = {

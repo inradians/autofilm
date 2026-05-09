@@ -105,8 +105,12 @@ GEMINI_FLASH_MODEL = "gemini_2.5_flash"     # 5 credits, any resolution
 # When VIDEO_BACKEND=google or IMAGE_BACKEND=google in produce.py, the
 # pipeline calls these instead of the Runway-proxied equivalents. No daily
 # task limits — billed directly against your GOOGLE_AI_API_KEY quota.
-GOOGLE_VEO_MODEL   = os.getenv("GOOGLE_VIDEO_MODEL", "veo-3.1-generate-preview")
-GOOGLE_IMAGE_MODEL = "imagen-3.0-generate-002"
+GOOGLE_VEO_MODEL          = os.getenv("GOOGLE_VIDEO_MODEL", "veo-3.1-generate-preview")
+GOOGLE_IMAGE_MODEL        = "imagen-3.0-generate-002"
+# Gemini 2.5 Flash Image (aka Nano Banana) — text-to-image with reference
+# image support via the Gemini API directly. Same model that Runway proxies
+# as gemini_image3_pro, but accessed without going through Runway.
+GOOGLE_NANO_BANANA_MODEL  = os.getenv("GOOGLE_NANO_BANANA_MODEL", "gemini-2.5-flash-image")
 
 # Reve API — api.reve.com
 # State-of-the-art image generation with create, remix (multi-ref), and edit.
@@ -234,6 +238,61 @@ def reve_image(
 
     # With Accept: image/png the response body is raw PNG bytes
     return resp.content
+
+
+def google_nano_banana(
+    prompt: str,
+    reference_images: list[bytes] | None = None,
+) -> bytes:
+    """Generate an image via Google Gemini 2.5 Flash Image (Nano Banana).
+
+    Direct Gemini API call — independent of Runway's daily task limits.
+    Uses the same underlying model that Runway proxies as gemini_image3_pro,
+    but billed against GOOGLE_AI_API_KEY.
+
+    Multi-reference support: pass up to ~14 reference image byte strings.
+    Excellent at character consistency and multi-image fusion.
+
+    Returns PNG bytes from the first inline_data part in the response.
+    """
+    from io import BytesIO
+    from google.genai import types as _gtypes
+    try:
+        from PIL import Image as _PIL
+    except ImportError as exc:
+        raise RuntimeError("Pillow required for google_nano_banana") from exc
+
+    client = _genai_client()
+
+    # Build content list: prompt first, then any reference images as PIL Images
+    contents: list = [prompt]
+    if reference_images:
+        for ref in reference_images[:14]:
+            contents.append(_PIL.open(BytesIO(ref)))
+
+    response = client.models.generate_content(
+        model=GOOGLE_NANO_BANANA_MODEL,
+        contents=contents,
+    )
+
+    # Walk parts looking for the first image
+    for part in (response.parts or []):
+        if getattr(part, "inline_data", None) and part.inline_data.data:
+            return part.inline_data.data
+        # Some SDK versions surface as `as_image()` helper instead
+        try:
+            img = part.as_image()
+            if img is not None:
+                buf = BytesIO()
+                img.save(buf, format="PNG")
+                return buf.getvalue()
+        except Exception:
+            pass
+
+    # Bubble up text response if no image returned (often a refusal)
+    text_blocks = [p.text for p in (response.parts or []) if getattr(p, "text", None)]
+    detail = " | ".join(text_blocks)[:300] if text_blocks else "no image in response"
+    raise RuntimeError(f"google_nano_banana ({GOOGLE_NANO_BANANA_MODEL}): {detail}")
 
 
 def google_veo(

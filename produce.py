@@ -62,6 +62,7 @@ from prepare import (
     ffmpeg,
     flux_image,
     gpt_image,
+    google_nano_banana,
     google_veo,
     ltx_video,
     nano_banana,
@@ -685,6 +686,15 @@ def _generate_image(
             ("openai_image",
              lambda: openai_image(prompt, size="1536x1024", quality="medium")),
         )
+
+    # Google Nano Banana direct — same model as Runway's gemini_image3_pro
+    # but billed against GOOGLE_AI_API_KEY, not subject to Runway quotas.
+    if os.environ.get("GOOGLE_AI_API_KEY"):
+        attempts.append((
+            "google_nano_banana",
+            lambda: google_nano_banana(prompt[:950],
+                                       reference_images=refs or None),
+        ))
 
     # Reve Remix — ref-aware, non-Runway (REVE_API_KEY).
     if os.environ.get("REVE_API_KEY") and refs:
