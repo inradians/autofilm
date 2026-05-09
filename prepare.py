@@ -715,11 +715,16 @@ def _book_slug(book_path: str | Path | None = None) -> str:
         "/uploads/JurassicPark-MichaelCrichton.pdf" -> "jurassic_park"
         "/uploads/Last Exit to Brooklyn.pdf"        -> "last_exit_to_brooklyn"
         "/uploads/the_great_gatsby.pdf"             -> "the_great_gatsby"
+        "/uploads/The-Steel-Drivin-Man.pdf"         -> "the_steel_drivin_man"
         ""                                          -> "unknown_book"
 
-    Author suffixes after the first dash are dropped (a common
-    "Title-Author" filename convention). CamelCase is split into snake.
-    Anything non-alphanumeric collapses to a single underscore.
+    Heuristics:
+        - 'Title-Author' suffix is only dropped when stem contains
+          EXACTLY ONE dash. Filenames like 'The-Steel-Drivin-Man.pdf'
+          use dashes as word separators and must NOT be truncated to
+          just 'the' by an over-eager split.
+        - CamelCase / PascalCase is split into snake_case.
+        - Anything non-alphanumeric collapses to a single underscore.
     """
     import re
     if book_path is None:
@@ -728,8 +733,10 @@ def _book_slug(book_path: str | Path | None = None) -> str:
     if not p.name:
         return "unknown_book"
     stem = p.stem
-    # Drop author suffix when filename uses "Title-Author" convention.
-    if "-" in stem:
+    # Title-Author convention: only drop suffix when there is exactly
+    # one dash. Multi-dash filenames are word-separated, not author-
+    # suffixed; splitting them silently truncates to the leading word.
+    if stem.count("-") == 1:
         stem = stem.split("-", 1)[0]
     # CamelCase / PascalCase → snake: insert _ before any non-leading caps.
     stem = re.sub(r"(?<!^)(?=[A-Z])", "_", stem)

@@ -428,6 +428,7 @@ def parse_script(exp: Experiment) -> dict:
         # still valid — just the title/source fields.
         derived_from_filename = _humanize_filename_to_title(BOOK_PDF_PATH)
         cached_title = (cached.get("title") or "").strip()
+        rewrite = False
         if (
             derived_from_filename
             and derived_from_filename != "Untitled"
@@ -445,6 +446,23 @@ def parse_script(exp: Experiment) -> dict:
                 f"{derived_from_filename} by {author}" if author
                 else derived_from_filename
             )
+            rewrite = True
+        # Stale-cast repair: older runs accumulated every character
+        # mentioned anywhere in the book, even those not appearing in
+        # the kept (MAX_SCENES-truncated) scenes. Sending all of them
+        # to the casting tool blew past max_tokens and the response
+        # arrived without a 'casting' key. Prune now so resumes
+        # automatically heal.
+        before = len(cached.get("characters", []))
+        cached["characters"] = _prune_characters_to_scenes(
+            cached.get("characters", []),
+            cached.get("scenes", []),
+        )
+        if len(cached["characters"]) != before:
+            print(f"  ⚠ script.json had {before} characters; pruned to "
+                  f"{len(cached['characters'])} appearing in kept scenes.")
+            rewrite = True
+        if rewrite:
             exp.write_json("script.json", cached)
         return cached
 
@@ -480,6 +498,18 @@ def parse_script(exp: Experiment) -> dict:
     if MAX_SCENES:
         scenes = scenes[:MAX_SCENES]
 
+    # Prune characters to only those appearing in the kept scenes.
+    # Without this, casting receives every character mentioned anywhere
+    # in the book — for a long novel that can be hundreds of names that
+    # never appear on screen because we only render the first N scenes.
+    # Sending all of them to the casting tool blows past max_tokens and
+    # the response is truncated, missing the required 'casting' key.
+    before = len(characters)
+    characters = _prune_characters_to_scenes(characters, scenes)
+    if before != len(characters):
+        print(f"  → pruned cast: {before} → {len(characters)} "
+              f"(only characters appearing in kept scenes)")
+
     # Final fallback: if Claude couldn't extract a title from any chunk
     # (happens for PDFs with no title page, or scanned books with poor
     # OCR on the cover), humanize the filename so we never end up with
@@ -500,6 +530,28 @@ def parse_script(exp: Experiment) -> dict:
     return script
 
 
+def _prune_characters_to_scenes(characters: list[dict], scenes: list[dict]) -> list[dict]:
+    """Trim a character list to only those appearing in the given scenes.
+
+    Used in two places:
+      1. After MAX_SCENES truncation in fresh parse_script runs, so the
+         casting tool only sees relevant characters.
+      2. On cached script.json load, to heal old runs that wrote a full
+         all-chunks character list before this pruning existed.
+
+    Returns the original list unchanged if no scene specifies its
+    characters list (i.e. nothing to prune against — better to send
+    everything than accidentally empty the cast).
+    """
+    kept_ids: set[str] = set()
+    for sc in scenes:
+        for cid in sc.get("characters", []):
+            kept_ids.add(cid)
+    if not kept_ids:
+        return characters
+    return [c for c in characters if c.get("id") in kept_ids]
+
+
 def _humanize_filename_to_title(path: Path | str) -> str:
     """Best-effort title from a filename, used only when Claude can't
     extract a title from the book content.
@@ -508,14 +560,19 @@ def _humanize_filename_to_title(path: Path | str) -> str:
       'JurassicPark-MichaelCrichton.pdf' -> 'Jurassic Park'
       'last_exit_to_brooklyn.pdf'        -> 'Last Exit To Brooklyn'
       'the_steel_drivin_man.pdf'         -> 'The Steel Drivin Man'
+      'The-Steel-Drivin-Man.pdf'         -> 'The Steel Drivin Man'
+
+    Same one-dash-only Title-Author heuristic as _book_slug — multi-
+    dash filenames use the dash as a word separator and must not be
+    truncated to a single leading word.
     """
     import re
     p = Path(path) if path else Path("")
     if not p.name:
         return "Untitled"
     stem = p.stem
-    # Drop "-Author" suffix if present (Title-Author convention).
-    if "-" in stem:
+    # Title-Author convention only when there's exactly one dash.
+    if stem.count("-") == 1:
         stem = stem.split("-", 1)[0]
     # CamelCase / PascalCase → words.
     stem = re.sub(r"(?<!^)(?=[A-Z])", " ", stem)
@@ -1162,9 +1219,22 @@ def cast_and_locations(exp: Experiment, script: dict) -> tuple[list[dict], list[
         user_content=f"Characters:\n{json.dumps(script['characters'], indent=2)}\n\nCast them.",
         tool_name="submit_casting",
         tool_schema=CAST_TOOL_SCHEMA,
-        max_tokens=6000,
+        max_tokens=8000,
     )
-    cast = cast_result["casting"]
+    cast = cast_result.get("casting")
+    if not cast:
+        # Common cause: too many characters in script['characters'] →
+        # response truncated by max_tokens → tool call returns no
+        # 'casting' key. Prevention is in parse_script (we now prune
+        # characters to those appearing in MAX_SCENES kept scenes),
+        # but if it still happens, surface a clear error rather than
+        # KeyError'ing on the next line.
+        raise RuntimeError(
+            f"casting tool returned no 'casting' key (got: "
+            f"{list(cast_result.keys())}). Most likely the response "
+            f"was truncated — script has {len(script.get('characters', []))} "
+            f"characters; consider lowering MAX_SCENES or pruning the cast."
+        )
     exp.write_json("cast.json", cast)
 
     # Locations.
@@ -1175,7 +1245,12 @@ def cast_and_locations(exp: Experiment, script: dict) -> tuple[list[dict], list[
         tool_schema=LOCATIONS_TOOL_SCHEMA,
         max_tokens=6000,
     )
-    locations = loc_result["locations"]
+    locations = loc_result.get("locations")
+    if not locations:
+        raise RuntimeError(
+            f"locations tool returned no 'locations' key (got: "
+            f"{list(loc_result.keys())})."
+        )
 
     # Generate ONE moodboard per location via Nano Banana 2 (it has the
     # world knowledge to render real-world locations accurately).
