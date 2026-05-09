@@ -144,11 +144,11 @@ def check_google() -> bool:
         client = genai.Client(api_key=key)
         # 1-token reachability check, free under quota.
         client.models.generate_content(
-            model="gemini-3-pro",
+            model="gemini-3.1-pro-preview",
             contents="ok",
             config={"max_output_tokens": 1},
         )
-        line("GOOGLE_AI_API_KEY", "OK", "gemini-3-pro reachable (critic enabled)")
+        line("GOOGLE_AI_API_KEY", "OK", "gemini-3.1-pro-preview reachable (critic enabled)")
         return True
     except ImportError:
         line("GOOGLE_AI_API_KEY", "FAIL",

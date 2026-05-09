@@ -91,7 +91,7 @@ MAX_SCENES = int(os.getenv("MAX_SCENES", "3"))
 # Runway: image, video, and SFX generation. See https://docs.dev.runwayml.com/guides/models/
 # Stability: Stable Audio 2.5 (music score — Runway has no music model).
 CLAUDE_MODEL = "claude-opus-4-7"
-GEMINI_PRO_MODEL = "gemini-3-pro"
+GEMINI_PRO_MODEL = "gemini-3.1-pro-preview"
 
 # Runway image model IDs. The Runway endpoint is /v1/text_to_image with the
 # `model` field selecting which generator. All three accept `referenceImages`

@@ -230,6 +230,36 @@ def _ffprobe_duration(path: Path) -> float:
     return float(json.loads(r.stdout)["format"]["duration"])
 
 
+def _ffprobe_video_stream_duration(path: Path) -> float | None:
+    """Read the VIDEO STREAM duration (not container duration).
+
+    Used to defend against audio/video drift in muxed files: the
+    container reports max(audio_duration, video_duration), so when
+    audio runs longer (acrossfade output), moviepy's `clip.duration`
+    is too long and trying to read past the actual frame count
+    produces 'using last valid frame' warnings — visible as a frozen
+    tail. Trimming to this value avoids that.
+
+    Returns None on probe failure so callers can fall through.
+    """
+    if not shutil.which("ffprobe"):
+        return None
+    try:
+        r = subprocess.run(
+            ["ffprobe", "-v", "error",
+             "-select_streams", "v:0",
+             "-show_entries", "stream=duration",
+             "-of", "json", str(path)],
+            capture_output=True, text=True, check=True,
+        )
+        streams = json.loads(r.stdout).get("streams", [])
+        if streams and streams[0].get("duration"):
+            return float(streams[0]["duration"])
+    except Exception:                                            # noqa: BLE001
+        pass
+    return None
+
+
 def _ffmpeg_probe_duration(path: Path) -> float:
     """Fallback duration probe using ffmpeg itself."""
     r = subprocess.run(
@@ -412,6 +442,13 @@ def render_clips_with_transitions(
         "-c:v", "libx264", "-preset", "medium", "-b:v", bitrate,
         "-pix_fmt", "yuv420p", "-r", str(fps),
         "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
+        # -shortest is critical here: ffmpeg's acrossfade output runs
+        # a hair longer than xfade's video output, so without this the
+        # muxer's duration metadata is longer than the actual video.
+        # moviepy then tries to read N "frames" past the real end of
+        # the video and fills them with the last valid frame — a
+        # visible 1-3s freeze at the tail of every transitioned scene.
+        "-shortest",
         str(output_path),
     ]
     subprocess.run(cmd, check=True)

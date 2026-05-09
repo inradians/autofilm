@@ -866,7 +866,7 @@ def _prompts_section(s: dict, doc: BibleDocTemplate, exp: Experiment) -> list:
         "eleven_text_to_sound_v2",
         "eleven_multilingual_v2",
         "claude-opus-4-7",
-        "gemini-3-pro",
+        "gemini-3.1-pro-preview",
     ]
     display_name = {
         "gpt_image_2":             "GPT Image 2 (via Runway)",
@@ -884,7 +884,7 @@ def _prompts_section(s: dict, doc: BibleDocTemplate, exp: Experiment) -> list:
         "eleven_text_to_sound_v2": "ElevenLabs SFX (via Runway)",
         "eleven_multilingual_v2":  "ElevenLabs TTS (via Runway)",
         "claude-opus-4-7":         "Claude Opus 4.7",
-        "gemini-3-pro":            "Gemini 3 Pro (critic)",
+        "gemini-3.1-pro-preview":            "Gemini 3.1 Pro Preview (critic)",
     }
 
     out: list = [_section_heading(s, doc, "7. Prompts")]

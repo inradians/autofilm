@@ -86,7 +86,7 @@ RATES: dict[str, dict[str, Any]] = {
     "claude-haiku-4-5-20251001": {"kind": "per_call", "rate": 0.003},
 
     # Critic — Gemini for video review
-    "gemini-3-pro":          {"kind": "per_call", "rate": 0.080},
+    "gemini-3.1-pro-preview":          {"kind": "per_call", "rate": 0.080},
 }
 
 
