@@ -2150,18 +2150,37 @@ def _merge_transition_into_decisions(decisions: list[dict], storyboard: dict) ->
 
 
 def build_edl(exp: Experiment, storyboard: dict, clips_manifest: dict) -> dict:
+    # Resume: if the existing EDL covers every storyboard shot, return
+    # it. Otherwise rebuild — a partial EDL from a prior crashed run
+    # would silently drop the missing shots from the final cut.
     if exp.has("edl.json"):
-        return exp.read_json("edl.json")
+        cached = exp.read_json("edl.json")
+        cached_keys = {(d["scene_id"], d["shot_id"]) for d in cached.get("decisions", [])}
+        storyboard_keys = {
+            (sid, shot["shot_id"])
+            for sid, shots in storyboard.items()
+            for shot in shots
+        }
+        missing = storyboard_keys - cached_keys
+        if not missing:
+            return cached
+        print(f"  ⚠ Cached edl.json missing {len(missing)} shot(s) "
+              f"({sorted(missing)[:3]}{'...' if len(missing) > 3 else ''}); "
+              f"rebuilding.")
 
-    # Single-take fast path.
+    # Single-take fast path. Iterate STORYBOARD order so every shot
+    # gets a decision — even if its take is missing from the manifest
+    # for some reason. compile_final's fallback then handles the
+    # "decision exists but no take" case explicitly rather than
+    # silently dropping the shot from the cut.
     max_takes = max((len(t) for s in clips_manifest.values() for t in s.values()),
                     default=0)
     if max_takes <= 1:
         decisions = [
-            {"scene_id": sid, "shot_id": shid, "chosen_take": 1,
-             "rationale": "Single take generated."}
-            for sid, shots in clips_manifest.items()
-            for shid in shots.keys()
+            {"scene_id": scene_id, "shot_id": shot["shot_id"],
+             "chosen_take": 1, "rationale": "Single take generated."}
+            for scene_id, shots in storyboard.items()
+            for shot in shots
         ]
         decisions = _merge_transition_into_decisions(decisions, storyboard)
         edl = {"decisions": decisions}
@@ -2388,21 +2407,52 @@ def compile_final(exp: Experiment, script: dict, storyboard: dict,
         # line up with the right pair of clips.
         ordered_decisions: list[dict] = []
         ordered_paths: list[Path] = []
+        skipped: list[str] = []   # for the per-scene summary line
         for shot in shots:
-            decision = decision_by_shot.get((scene_id, shot["shot_id"]))
+            shot_id = shot["shot_id"]
+            decision = decision_by_shot.get((scene_id, shot_id))
             if not decision:
+                # Shot is in storyboard but EDL has no decision for it.
+                # Most common cause: build_edl's vision-based picker
+                # returned a partial response, or the manifest didn't
+                # include this shot when the EDL was first written.
+                # Fall back to take 1 if a take file actually exists,
+                # so the shot isn't silently dropped from the cut.
+                takes = clips_manifest.get(scene_id, {}).get(shot_id, [])
+                if takes and Path(takes[0]).exists():
+                    decision = {
+                        "scene_id":     scene_id,
+                        "shot_id":      shot_id,
+                        "chosen_take":  1,
+                        "rationale":    "Fallback (no EDL decision found at compile time)",
+                    }
+                    print(f"  ⚠ {scene_id}/{shot_id}: no EDL decision, "
+                          f"falling back to take 1")
+                else:
+                    skipped.append(f"{shot_id} (no decision, no takes)")
+                    continue
+            takes = clips_manifest.get(scene_id, {}).get(shot_id, [])
+            if not takes:
+                skipped.append(f"{shot_id} (no takes in manifest)")
                 continue
-            takes = clips_manifest.get(scene_id, {}).get(shot["shot_id"], [])
             take_idx = max(0, decision["chosen_take"] - 1)
             if take_idx >= len(takes):
                 take_idx = 0
-            if not takes:
-                continue
             cp = Path(takes[take_idx])
             if not cp.exists():
+                skipped.append(f"{shot_id} (take file missing: {cp.name})")
                 continue
             ordered_decisions.append(decision)
             ordered_paths.append(cp)
+
+        # Per-scene summary: makes 'missing clips in final' diagnosable.
+        included = len(ordered_paths)
+        total    = len(shots)
+        if skipped:
+            print(f"  {scene_id}: {included}/{total} shots included; "
+                  f"skipped — {', '.join(skipped)}")
+        else:
+            print(f"  {scene_id}: {included}/{total} shots included")
 
         if not ordered_paths:
             continue
