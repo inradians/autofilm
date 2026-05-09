@@ -417,7 +417,36 @@ PARSE_TOOL_SCHEMA = {
 
 def parse_script(exp: Experiment) -> dict:
     if exp.has("script.json"):
-        return exp.read_json("script.json")
+        cached = exp.read_json("script.json")
+        # Stale-title repair: older versions of produce.py hardcoded
+        # the title (e.g. "Jurassic Park") regardless of which book was
+        # actually parsed. If we detect that the cached title doesn't
+        # match the current BOOK_PDF_PATH the user is running against,
+        # repair the title and source IN PLACE so downstream stages
+        # (and reviewers) see the right metadata. We don't regenerate
+        # the entire script — characters, scenes, and dialogue are
+        # still valid — just the title/source fields.
+        derived_from_filename = _humanize_filename_to_title(BOOK_PDF_PATH)
+        cached_title = (cached.get("title") or "").strip()
+        if (
+            derived_from_filename
+            and derived_from_filename != "Untitled"
+            and cached_title
+            and _title_seems_stale(cached_title, derived_from_filename)
+        ):
+            print(f"  ⚠ script.json title '{cached_title}' doesn't match "
+                  f"current book file (expected ~ '{derived_from_filename}'); "
+                  f"repairing in place.")
+            cached["title"] = derived_from_filename
+            # Preserve author if Claude extracted one — but rebuild the
+            # combined source string from the corrected title.
+            author = (cached.get("author") or "").strip()
+            cached["source"] = (
+                f"{derived_from_filename} by {author}" if author
+                else derived_from_filename
+            )
+            exp.write_json("script.json", cached)
+        return cached
 
     chunks = book_chunks(pages_per_chunk=25)
     characters: list[dict] = []
@@ -494,6 +523,40 @@ def _humanize_filename_to_title(path: Path | str) -> str:
     stem = re.sub(r"[_.\-]+", " ", stem).strip()
     # Title-case each word.
     return " ".join(w.capitalize() for w in stem.split() if w) or "Untitled"
+
+
+def _title_seems_stale(cached_title: str, expected_title: str) -> bool:
+    """Decide whether a cached script.json title is a stale hardcode.
+
+    'Stale' means the cached title contains no shared significant word
+    with the title we'd derive from the current book filename. We can't
+    require an exact match because Claude often produces a more polished
+    version of the filename-derived title (e.g., 'The Steel-Driving
+    Man' vs 'The Steel Drivin Man') — those are LEGITIMATELY different.
+
+    Stale: cached='Jurassic Park', filename='The Steel Drivin Man'
+           → no shared word → repair.
+    Fine:  cached='The Steel-Driving Man', filename='The Steel Drivin Man'
+           → 'steel'/'man' overlap → keep cached (Claude's version is
+           better than the mechanical filename humanization).
+    """
+    import re
+
+    def _significant_words(s: str) -> set[str]:
+        # Strip stopwords and short tokens. 'the', 'a', 'of', 'by' etc.
+        # carry no signal for matching.
+        stop = {"the", "a", "an", "of", "and", "or", "by", "to", "in",
+                "on", "at", "for", "with", "from"}
+        words = re.findall(r"[a-z0-9]+", s.lower())
+        return {w for w in words if len(w) >= 3 and w not in stop}
+
+    cached_words   = _significant_words(cached_title)
+    expected_words = _significant_words(expected_title)
+    if not expected_words:
+        return False  # we have nothing to compare against; trust cached
+    # If the two share NO significant word, the cached title is from a
+    # different book entirely.
+    return not (cached_words & expected_words)
 
 
 # ============================================================================

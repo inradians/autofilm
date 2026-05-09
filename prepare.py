@@ -86,7 +86,7 @@ BOOK_PDF_PATH = Path(os.getenv("BOOK_PDF_PATH", ""))
 MAX_SCENES = int(os.getenv("MAX_SCENES", "3"))
 
 # --- Models (SOTA stack as of May 2026, accessed via Runway + Anthropic + Stability) ---
-# Anthropic: Claude Opus 4.7 (text/critic-stills, direct API).
+# Anthropic: Claude Opus 4.7 (text only — critic moved to Gemini-only).
 # Google AI: Gemini 3 Pro (long-video critic only — Runway has no video-review LLM).
 # Runway: image, video, and SFX generation. See https://docs.dev.runwayml.com/guides/models/
 # Stability: Stable Audio 2.5 (music score — Runway has no music model).
@@ -648,13 +648,14 @@ def runway_client() -> RunwayML:
 
 @lru_cache(maxsize=1)
 def gemini_client():
-    """Critic-only Gemini 3 Pro client (long-video review in evaluate_film).
+    """Critic Gemini 3.1 Pro Preview client (long-video review in evaluate_film).
 
-    All image/video generation lives in Runway now; this client only exists
-    because Runway has no equivalent video-review LLM endpoint. If you don't
-    care about Reviewer A and only want Claude's stills review, you can
-    leave GOOGLE_AI_API_KEY blank and `evaluate_film` will degrade to a
-    one-reviewer score.
+    All image/video generation lives in Runway now; this client exists
+    because Runway has no equivalent video-review LLM endpoint, and
+    Gemini is currently the only model that natively reviews multi-
+    minute video with timestamp grounding. Without GOOGLE_AI_API_KEY,
+    evaluate_film cannot score the film and the autoresearch loop falls
+    over — the API key is required, not optional, when running the loop.
     """
     from google import genai  # type: ignore
     return genai.Client(api_key=_require_key("GOOGLE_AI_API_KEY"))
@@ -2407,15 +2408,18 @@ CRITIC_TOOL_SCHEMA = {
 def evaluate_film(exp: Experiment) -> dict:
     """Run the critic over the finished film + write metric.json.
 
-    Combines:
-      - Gemini 3 Pro: native long-video review with timestamp citations
-      - Claude Opus 4.7: independent second-opinion on representative stills
-      - CLIP: numerical character-identity drift across shots
+    Reviewer:
+      - Gemini 3.1 Pro Preview: native long-video review with timestamp
+        citations. Single-source — Claude was previously a second-opinion
+        on stills, but it consistently misread metadata (e.g., insisted
+        the source was Jurassic Park even when script.json said
+        otherwise) so we removed it. Gemini watches the actual rendered
+        film, which is more grounded.
+      - CLIP: numerical character-identity drift across shots.
 
     Final film_loss is the weighted sum of the six axis scores from the
-    averaged Gemini + Claude rubrics. CLIP drift is reported separately
-    but does NOT modify film_loss directly — the human-style critics
-    factor it into 'continuity' implicitly.
+    Gemini rubric. CLIP drift is reported separately but does NOT modify
+    film_loss directly — Gemini factors it into 'continuity' implicitly.
     """
     final_path = exp.path("final.mp4")
     if not final_path.exists():
@@ -2423,23 +2427,11 @@ def evaluate_film(exp: Experiment) -> dict:
 
     script = exp.read_json("script.json")
 
-    # --- Reviewer A: Gemini 3 Pro on the actual video ---
+    # --- Gemini reviews the rendered film ---
     gemini_result = _critic_gemini_video(final_path, script)
+    scores = gemini_result["scores"]
 
-    # --- Reviewer B: Claude on representative stills ---
-    frames = sorted(exp.path("frames").rglob("*.png"))
-    step = max(1, len(frames) // 16)
-    sampled_frames = frames[::step][:16]
-    claude_result = _critic_claude_stills(script, sampled_frames)
-
-    # --- Average the two reviewers' scores per axis ---
-    avg_scores = {}
-    for axis in LOSS_WEIGHTS:
-        avg_scores[axis] = (
-            gemini_result["scores"][axis] + claude_result["scores"][axis]
-        ) / 2.0
-
-    film_loss = sum(LOSS_WEIGHTS[a] * avg_scores[a] for a in LOSS_WEIGHTS)
+    film_loss = sum(LOSS_WEIGHTS[a] * scores[a] for a in LOSS_WEIGHTS)
 
     # --- CLIP drift (informational) ---
     clip_scores = _clip_drift(exp)
@@ -2448,12 +2440,10 @@ def evaluate_film(exp: Experiment) -> dict:
     md = "# Film Critique\n\n"
     md += f"## Final film_loss = {film_loss:.4f}\n\n"
     md += "Per-axis (lower is better):\n\n"
-    for axis, score in avg_scores.items():
+    for axis, score in scores.items():
         md += f"- **{axis}**: {score:.3f}  (weight {LOSS_WEIGHTS[axis]:.2f})\n"
-    md += "\n## Reviewer A — Gemini 3 Pro (video)\n\n"
-    md += gemini_result["prose_critique_markdown"] + "\n\n"
-    md += "## Reviewer B — Claude Opus 4.7 (stills)\n\n"
-    md += claude_result["prose_critique_markdown"]
+    md += "\n## Reviewer — Gemini 3.1 Pro Preview (video)\n\n"
+    md += gemini_result["prose_critique_markdown"]
     if clip_scores:
         md += "\n\n## CLIP character-identity drift (informational)\n\n"
         md += "Cosine similarity, lower = more drift. <0.70 means actor lost.\n\n"
@@ -2461,24 +2451,17 @@ def evaluate_film(exp: Experiment) -> dict:
             md += f"- **{k}**: {v:.3f}\n"
     exp.write_bytes("critique.md", md.encode())
 
-    # --- Merge changes from both reviewers, prioritized by impact ---
-    all_changes = []
-    for c in gemini_result.get("changes", []):
-        all_changes.append({**c, "reviewer": "gemini"})
-    for c in claude_result.get("changes", []):
-        all_changes.append({**c, "reviewer": "claude"})
+    # --- Use Gemini's change list directly (no merge needed) ---
+    all_changes = [{**c, "reviewer": "gemini"} for c in gemini_result.get("changes", [])]
     # Sort: high-priority first, then medium, then low.
     pri = {"high": 0, "medium": 1, "low": 2}
     all_changes.sort(key=lambda c: pri.get(c.get("priority", "low"), 3))
 
     metric = {
         "film_loss": film_loss,
-        "scores": avg_scores,
+        "scores": scores,
         "weights": LOSS_WEIGHTS,
-        "reviewers": {
-            "gemini_scores": gemini_result["scores"],
-            "claude_scores": claude_result["scores"],
-        },
+        "reviewer": "gemini-3.1-pro-preview",
         "clip_drift": clip_scores,
         "changes": all_changes,
     }
@@ -2559,37 +2542,6 @@ def encode_image_for_claude(
     buf = io.BytesIO()
     img.save(buf, "JPEG", quality=quality, optimize=True)
     return "image/jpeg", base64.b64encode(buf.getvalue()).decode()
-
-
-def _critic_claude_stills(script: dict, frames: list[Path]) -> dict:
-    """Claude reviews representative stills as a second opinion.
-
-    Frames are downscaled and JPEG-compressed via encode_image_for_claude
-    before sending — at native 1792x1024 PNG, 16 frames base64-encoded
-    blows past Anthropic's 32 MB request size limit.
-    """
-    content: list[dict] = [
-        {"type": "text", "text": (
-            "Score this generated film on the six axes via the tool.\n\n"
-            f"SOURCE SCRIPT (truncated):\n{json.dumps(script)[:15000]}\n\n"
-            f"REPRESENTATIVE STILLS:\n"
-        )},
-    ]
-    for p in frames:
-        media_type, data = encode_image_for_claude(p)
-        content.append({
-            "type": "image",
-            "source": {"type": "base64", "media_type": media_type, "data": data},
-        })
-        content.append({"type": "text", "text": f"^ {p.parent.name}/{p.stem}"})
-
-    return claude_tool(
-        system=CRITIC_SYSTEM,
-        user_content=content,
-        tool_name="submit_review",
-        tool_schema=CRITIC_TOOL_SCHEMA,
-        max_tokens=8000,
-    )
 
 
 def _clip_drift(exp: Experiment) -> dict[str, float]:

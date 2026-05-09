@@ -1023,29 +1023,10 @@ def _critique_section(s: dict, doc: BibleDocTemplate, exp: Experiment) -> list:
     ]))
     out.append(tbl)
 
-    # Per-reviewer breakdown.
-    reviewers = metric.get("reviewers", {})
-    if reviewers:
-        out.append(Spacer(1, 12))
-        out.append(Paragraph("Per-reviewer scores", s["h3"]))
-        rev_rows = [["Axis", "Gemini 3 Pro (video)", "Claude Opus 4.7 (stills)"]]
-        for axis in LOSS_WEIGHTS:
-            g = reviewers.get("gemini_scores", {}).get(axis, "—")
-            c = reviewers.get("claude_scores", {}).get(axis, "—")
-            rev_rows.append([axis,
-                             f"{g:.3f}" if isinstance(g, (int, float)) else str(g),
-                             f"{c:.3f}" if isinstance(c, (int, float)) else str(c)])
-        rev_tbl = Table(rev_rows, colWidths=[1.5 * inch, 2.4 * inch, 2.4 * inch])
-        rev_tbl.setStyle(TableStyle([
-            ("BACKGROUND",   (0, 0), (-1, 0), COL_TABLE_HEAD),
-            ("FONTNAME",     (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("FONTSIZE",     (0, 0), (-1, -1), 9),
-            ("LINEBELOW",    (0, 0), (-1, -1), 0.3, COL_RULE),
-            ("LEFTPADDING",  (0, 0), (-1, -1), 6),
-            ("TOPPADDING",   (0, 0), (-1, -1), 4),
-            ("BOTTOMPADDING",(0, 0), (-1, -1), 4),
-        ]))
-        out.append(rev_tbl)
+    # (Per-reviewer breakdown removed: Gemini is now the sole critic,
+    # so the headline scores in the table above are the per-reviewer
+    # scores. Older metric.json files with a "reviewers" key still
+    # parse cleanly because we just stopped reading it.)
 
     # Suggested changes.
     changes = metric.get("changes", [])
