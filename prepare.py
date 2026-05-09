@@ -1011,15 +1011,33 @@ def stable_audio(prompt: str, duration_seconds: int = 30) -> bytes:
 
     Kept on the direct Stability API; Runway has no music model.
     """
-    api_key = _require_key("STABILITY_API_KEY")
+    api_key  = _require_key("STABILITY_API_KEY")
+    # Cap prompt to 450 chars — Stability has an undocumented limit and
+    # returns an opaque 400 when it's exceeded.
+    prompt   = prompt[:450]
+    duration = float(min(max(duration_seconds, 1), 47))
+
+    # Build proper multipart/form-data without a dummy "none" field —
+    # the old files={"none": ""} trick causes 400 on some API versions.
     resp = httpx.post(
         "https://api.stability.ai/v2beta/audio/stable-audio-2/text-to-audio",
         headers={"Authorization": f"Bearer {api_key}", "Accept": "audio/wav"},
-        files={"none": ""},
-        data={"prompt": prompt, "duration": min(duration_seconds, 47), "output_format": "wav"},
+        files={
+            "prompt":        (None, prompt),
+            "duration":      (None, str(duration)),
+            "output_format": (None, "wav"),
+        },
         timeout=180.0,
     )
-    resp.raise_for_status()
+    if not resp.is_success:
+        # Surface the actual rejection reason before raising.
+        try:
+            detail = resp.json()
+        except Exception:
+            detail = resp.text[:400]
+        raise RuntimeError(
+            f"Stability audio {resp.status_code}: {detail}"
+        )
     return resp.content
 
 

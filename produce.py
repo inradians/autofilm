@@ -1019,8 +1019,8 @@ def build_music(exp: Experiment, script: dict, storyboard: dict) -> None:
         duration  = _scene_duration(scene_id)
         music_prompt = (
             f"{MUSIC_STYLE}. Scene mood: {scene.get('mood', '')}. "
-            f"{scene.get('summary', '')[:200]}"
-        )
+            f"{scene.get('summary', '')[:150]}"
+        )[:450]   # Stability caps at ~450 chars
         if not out_path.exists():
             try:
                 audio = stable_audio(music_prompt, duration_seconds=duration)
