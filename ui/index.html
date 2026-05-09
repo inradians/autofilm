@@ -174,6 +174,86 @@
     line-height: 1.45; white-space: pre-wrap; margin: 6px 0 0;
   }
 
+  /* Terminal console — primary live log shown in main area while a run
+     is happening. Distinct from the sidebar log tail (which exists as a
+     fallback / for completed runs). Designed to read like a real
+     terminal: dark bg, monospace, syntax-color status markers, and
+     auto-scroll-to-bottom unless the user scrolls up to inspect. */
+  .console-wrap {
+    background: #0a0b0e; border: 1px solid var(--border);
+    border-radius: 4px;
+    margin-bottom: 18px;
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .console-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 10px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+  }
+  .console-head .left {
+    display: flex; align-items: center; gap: 10px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 11px; color: var(--muted);
+    letter-spacing: 0.04em;
+  }
+  .console-head .traffic-lights {
+    display: inline-flex; gap: 4px; padding-right: 4px;
+  }
+  .console-head .traffic-lights span {
+    width: 9px; height: 9px; border-radius: 50%;
+    background: #5a5e66;
+  }
+  .console-head .traffic-lights span:nth-child(1) { background: #d76262; }
+  .console-head .traffic-lights span:nth-child(2) { background: #d6a85c; }
+  .console-head .traffic-lights span:nth-child(3) { background: #5da877; }
+  .console-head .live-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--good); animation: pulse 1.4s infinite;
+  }
+  .console-head .live-dot.idle { background: var(--muted); animation: none; }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(93, 168, 119, 0.5); }
+    50%      { box-shadow: 0 0 0 4px rgba(93, 168, 119, 0); }
+  }
+  .console-head .right {
+    display: flex; align-items: center; gap: 12px;
+    font-family: ui-monospace, monospace;
+    font-size: 10px; color: var(--muted);
+  }
+  .console-head .right button {
+    background: none; border: 1px solid var(--border); color: var(--muted);
+    font: inherit; padding: 2px 8px; border-radius: 3px;
+    cursor: pointer;
+  }
+  .console-head .right button:hover { color: var(--ink); border-color: var(--ink); }
+
+  .console-body {
+    background: #0a0b0e; color: #c2c6cf;
+    height: 320px; max-height: 320px; overflow-y: auto; overflow-x: auto;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 11.5px; line-height: 1.5;
+    padding: 8px 10px;
+    scroll-behavior: smooth;
+  }
+  .console-body .row {
+    display: block; white-space: pre; padding-left: 0;
+  }
+  .console-body .row.success { color: #6dbf85; }
+  .console-body .row.error   { color: #e07a7a; }
+  .console-body .row.warn    { color: #d6a85c; }
+  .console-body .row.stage   { color: #b85c47; font-weight: 600; }
+  .console-body .row.iter    { color: #b85c47; font-weight: 600; }
+  .console-body .row.dim     { color: #7a7e88; }
+
+  .console-body::-webkit-scrollbar { width: 8px; height: 8px; }
+  .console-body::-webkit-scrollbar-track { background: transparent; }
+  .console-body::-webkit-scrollbar-thumb {
+    background: #2a2d33; border-radius: 4px;
+  }
+  .console-body::-webkit-scrollbar-thumb:hover { background: #3a3d43; }
+
   hr.div { border: 0; border-top: 1px solid var(--border); margin: 18px 0; }
 
   /* Main area: experiment focus */
@@ -482,7 +562,25 @@
 
   <!-- ── Main area ─────────────────────────────────────────── -->
   <section class="main-area" id="mainArea">
-    <div class="empty">No experiments yet — start a run to populate this view.</div>
+    <!-- Terminal-style live console. Hidden by default; revealed
+         whenever the run state is running OR the buffer has content. -->
+    <div class="console-wrap" id="consoleWrap" style="display:none">
+      <div class="console-head">
+        <div class="left">
+          <span class="traffic-lights"><span></span><span></span><span></span></span>
+          <span id="consoleTitle">autofilm — run.log</span>
+          <span class="live-dot idle" id="consoleLiveDot"></span>
+        </div>
+        <div class="right">
+          <span id="consoleLineCount">0 lines</span>
+          <button type="button" id="consoleStickBtn" title="Toggle stick-to-bottom">
+            ↓ stick
+          </button>
+        </div>
+      </div>
+      <div class="console-body" id="consoleBody"></div>
+    </div>
+    <div class="empty" id="mainEmpty">No experiments yet — start a run to populate this view.</div>
   </section>
 </main>
 
@@ -730,7 +828,18 @@ function renderCost(cost) {
 
 function renderExperimentDetail(data, isLive = false) {
   const target = $('mainArea');
-  target.innerHTML = '';
+  // Find or create the experiment-detail container, leaving #consoleWrap
+  // and #mainEmpty siblings alone so the live console stays mounted.
+  let detailHost = target.querySelector('#expDetail');
+  if (!detailHost) {
+    detailHost = document.createElement('div');
+    detailHost.id = 'expDetail';
+    target.appendChild(detailHost);
+  }
+  detailHost.innerHTML = '';
+  // Hide the empty placeholder once we actually have content to show.
+  const empty = $('mainEmpty');
+  if (empty) empty.style.display = 'none';
   const container = document.createElement('div');
 
   const head = document.createElement('div');
@@ -811,7 +920,7 @@ function renderExperimentDetail(data, isLive = false) {
     note.style.padding = '20px 0';
     note.textContent = 'production_bible.json not yet written.';
     container.appendChild(note);
-    target.appendChild(container);
+    detailHost.appendChild(container);
     return;
   }
 
@@ -932,7 +1041,7 @@ function renderExperimentDetail(data, isLive = false) {
     container.appendChild(s);
   }
 
-  target.appendChild(container);
+  detailHost.appendChild(container);
 }
 
 // ── Status bars + progress ──────────────────────────────────
@@ -987,6 +1096,118 @@ function renderLogTail(elId, lines) {
   const el = $(elId);
   el.textContent = (lines || []).join('\n');
   el.scrollTop = el.scrollHeight;
+}
+
+// ── Live terminal console ────────────────────────────────────────
+//
+// The sidebar log-tail elements above are kept as a fallback. The main
+// console below is the primary live-progress view: large, prominent
+// at the top of the main area, color-coded by line type, and
+// stick-to-bottom unless the user scrolls up to inspect.
+
+let consoleStickToBottom = true;
+let consoleLastLineCount = 0;
+
+// Classify a log line for color highlighting. Order matters — more
+// specific patterns first.
+function _classifyLine(line) {
+  const t = line.trim();
+  if (!t) return 'dim';
+  if (/^═{4,}/.test(t) || /Loop completed:/.test(t)) return 'iter';
+  if (/^ITERATION\s+\d+/i.test(t)) return 'iter';
+  if (/^\[exp_\d+\]\s+Stage\b/.test(t)) return 'stage';
+  if (/^\s*✓/.test(t) || /\ball succeeded\b/.test(t))            return 'success';
+  if (/^\s*✗/.test(t) || /\bfailed\b/i.test(t) || /Error/.test(t)) return 'error';
+  if (/^\s*⚠/.test(t) || /Warning/i.test(t))                      return 'warn';
+  if (/^\s*→/.test(t) || /^\s*└─/.test(t))                        return 'dim';
+  return null;   // default body color
+}
+
+// Console sticks to bottom unless the user has scrolled up. We compare
+// scrollTop to (scrollHeight - clientHeight) within a small fudge.
+function _consoleIsAtBottom(el) {
+  return el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+}
+
+function renderConsole(lines) {
+  const wrap = $('consoleWrap');
+  const body = $('consoleBody');
+  const dot  = $('consoleLiveDot');
+  const cnt  = $('consoleLineCount');
+
+  const total = (lines && lines.length) || 0;
+  // Show / hide based on whether we have anything to render. We don't
+  // hide it once content exists — even after a run finishes the user
+  // wants to scroll back through what happened.
+  if (!total) {
+    wrap.style.display = 'none';
+    return;
+  }
+  wrap.style.display = '';
+
+  // Append-only fast path: if the new line list extends what we already
+  // rendered, just add the new tail. Otherwise rebuild (e.g. log was
+  // cleared or rolled past max_buffer at the front).
+  const newLines = lines.slice(consoleLastLineCount);
+  const wasAtBottom = _consoleIsAtBottom(body);
+
+  if (consoleLastLineCount === 0 || newLines.length === total) {
+    // Full rebuild
+    body.innerHTML = '';
+    for (const line of lines) _appendConsoleLine(body, line);
+  } else {
+    for (const line of newLines) _appendConsoleLine(body, line);
+  }
+  consoleLastLineCount = total;
+  cnt.textContent = `${total} line${total === 1 ? '' : 's'}`;
+
+  if (consoleStickToBottom && (wasAtBottom || newLines.length > 0)) {
+    body.scrollTop = body.scrollHeight;
+  }
+}
+
+function _appendConsoleLine(body, line) {
+  const row = document.createElement('span');
+  row.className = 'row';
+  const cls = _classifyLine(line);
+  if (cls) row.classList.add(cls);
+  row.textContent = line + '\n';
+  body.appendChild(row);
+}
+
+function setConsoleLive(isRunning) {
+  const dot = $('consoleLiveDot');
+  if (isRunning) dot.classList.remove('idle');
+  else dot.classList.add('idle');
+}
+
+// Stick-to-bottom toggle. Also tracks when user manually scrolls up to
+// pause auto-scroll, and re-engages when they scroll back to bottom.
+function _initConsoleControls() {
+  const body = $('consoleBody');
+  const btn  = $('consoleStickBtn');
+  function refreshBtn() {
+    btn.textContent = consoleStickToBottom ? '↓ stick' : '↑ paused';
+    btn.style.color = consoleStickToBottom ? 'var(--good)' : 'var(--warn)';
+  }
+  refreshBtn();
+  btn.addEventListener('click', () => {
+    consoleStickToBottom = !consoleStickToBottom;
+    if (consoleStickToBottom) body.scrollTop = body.scrollHeight;
+    refreshBtn();
+  });
+  body.addEventListener('scroll', () => {
+    // If the user scrolls up by more than ~24px from the bottom, pause
+    // auto-stick. If they scroll back to bottom, re-engage.
+    const atBottom = _consoleIsAtBottom(body);
+    if (atBottom && !consoleStickToBottom) {
+      consoleStickToBottom = true;
+      refreshBtn();
+    } else if (!atBottom && consoleStickToBottom) {
+      consoleStickToBottom = false;
+      refreshBtn();
+    }
+  });
 }
 
 // ── Experiment dropdown ─────────────────────────────────────
@@ -1107,6 +1328,16 @@ async function poll() {
     renderLogTail('runLog',   data.run.log_tail);
     renderLogTail('smokeLog', data.smoke.log_tail);
     renderStepper(data.run.progress);
+
+    // Live terminal console — primary progress view, top of main area.
+    // Prefer the run log; fall back to smoke when only smoke has output.
+    const consoleLines = (data.run.log_tail && data.run.log_tail.length)
+      ? data.run.log_tail : data.smoke.log_tail;
+    const consoleTitle = (data.run.log_tail && data.run.log_tail.length)
+      ? 'autofilm — run.log' : 'autofilm — smoke.log';
+    $('consoleTitle').textContent = consoleTitle;
+    renderConsole(consoleLines);
+    setConsoleLive(data.run.is_running || data.smoke.is_running);
 
     $('startBtn').style.display = data.run.is_running ? 'none' : '';
     $('stopBtn').style.display  = data.run.is_running ? '' : 'none';
@@ -1244,6 +1475,7 @@ $('smokeBtn').addEventListener('click', async () => {
 });
 
 setupDropzone();
+_initConsoleControls();
 poll();
 setInterval(poll, 3000);
 </script>

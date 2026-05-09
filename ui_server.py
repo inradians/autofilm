@@ -245,7 +245,7 @@ class RunState:
             "finished_at":  self.finished_at,
             "exit_code":    self.exit_code,
             "is_running":   self.process is not None and self.process.poll() is None,
-            "log_tail":     buf[-200:],
+            "log_tail":     buf[-600:],
             "log_total":    len(buf),
             "progress":     progress,
         }
