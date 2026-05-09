@@ -126,26 +126,36 @@ def build_production_bible_dict(exp: Experiment) -> dict[str, Any]:
     # ── Stage 2: cast & locations ──────────────────────────────────────
     if exp.has("cast.json"):
         cast = exp.read_json("cast.json")
+        # Cast rows use "character_id" per CAST_TOOL_SCHEMA — accept "id"
+        # too as a defensive fallback for older fixtures.
         bible["stages"]["cast"] = {
             "path":     "cast.json",
             "n_cast":   len(cast),
-            "by_id":    {c["id"]: c.get("name") for c in cast},
+            "by_id":    {(c.get("character_id") or c.get("id") or ""): c.get("actor")
+                         for c in cast},
         }
-    if exp.has("locations.json"):
-        locations = exp.read_json("locations.json")
-        moodboards: dict[str, str] = {}
-        for loc in locations:
-            slug = loc.get("slug")
-            mb_paths = loc.get("moodboard_paths") or []
-            if slug and mb_paths:
-                # Store the first (and currently only) moodboard path,
-                # relative to the exp root.
-                p = Path(mb_paths[0])
-                if p.exists():
-                    moodboards[slug] = _rel(p, root)
+
+    # Scan the location_moodboards directory DIRECTLY rather than going
+    # through locations.json's moodboard_paths field. produce.py only
+    # rewrites locations.json after the parallel moodboard stage's
+    # barrier clears — so going through the JSON misses moodboards that
+    # exist on disk during the stage. Scanning the dir gives true live
+    # updates as each file appears.
+    moodboards: dict[str, str] = {}
+    mb_root = root / "location_moodboards"
+    if mb_root.is_dir():
+        for slug_dir in sorted(mb_root.iterdir()):
+            if not slug_dir.is_dir():
+                continue
+            pngs = sorted(slug_dir.glob("*.png"))
+            if pngs:
+                moodboards[slug_dir.name] = _rel(pngs[0], root)
+
+    if exp.has("locations.json") or moodboards:
+        n_locations = len(exp.read_json("locations.json")) if exp.has("locations.json") else 0
         bible["stages"]["locations"] = {
-            "path":         "locations.json",
-            "n_locations":  len(locations),
+            "path":         "locations.json" if exp.has("locations.json") else None,
+            "n_locations":  n_locations,
             "moodboards":   moodboards,
         }
 

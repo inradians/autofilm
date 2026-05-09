@@ -430,7 +430,29 @@ let pipelineStages = [];   // populated from /api/state
 let selectedExpKey = "";   // empty = follow latest
 let lastExperimentList = [];
 let currentlyShownKey  = "";   // last exp we actually rendered
+let lastDetailFingerprint = ""; // hash of last rendered detail to skip no-ops
 let appliedLastRun     = false; // populate-from-last-run only once
+
+// Cheap stable hash of an object's enumerable shape — used to skip
+// re-renders when nothing visible has changed (avoids video flicker).
+function fingerprintDetail(data) {
+  if (!data) return "";
+  const b = data.bible || {};
+  const st = b.stages || {};
+  const counts = {
+    refs:    Object.keys(st.references?.by_scene_char    || {}).length,
+    frames:  Object.keys(st.frames?.by_scene_shot        || {}).length,
+    clips:   Object.keys(st.clips?.by_scene_shot_take    || {}).length,
+    music:   Object.keys(st.music?.by_scene              || {}).length,
+    narr:    Object.keys(st.narration?.by_scene          || {}).length,
+    moods:   Object.keys(st.locations?.moodboards        || {}).length,
+    sf:      st.lookbook?.style_frame ? 1 : 0,
+    final:   st.final?.path ? 1 : 0,
+  };
+  const cost = data.cost?.total_usd ?? 0;
+  const loss = b.metric?.film_loss ?? null;
+  return JSON.stringify({ counts, cost, loss, parent: b.parent_exp });
+}
 
 // ── Render helpers ──────────────────────────────────────────
 
@@ -898,32 +920,52 @@ async function poll() {
       rebuildDropdown(data.experiments);
     }
 
-    // Decide what to show in the main area:
-    // - if user has chosen one, show that
-    // - else if a run is in progress, show the live current_exp
-    // - else show the most recent experiment
+    // Decide what to show in the main area and whether to live-refresh:
+    //
+    //   showKey: which experiment to render
+    //   isLive : true when the selected exp is the one currently being
+    //            written by produce.py — forces a re-fetch each poll so
+    //            new artifacts (frames, clips, audio) appear as they're
+    //            created on disk.
+    //
+    // Live mode triggers when the run is in progress AND the showKey
+    // matches the current exp — whether the user explicitly picked it
+    // from the dropdown or fell through to auto-follow.
     let showKey = selectedExpKey;
-    let isLive = false;
     if (!showKey) {
       if (data.run.is_running && data.run.progress?.current_exp) {
         showKey = data.run.progress.current_exp;
-        isLive = true;
       } else if (data.experiments.length) {
         showKey = data.experiments[0].qualified;
       }
     }
+    const liveExp = data.run.is_running ? data.run.progress?.current_exp : null;
+    const isLive  = !!(liveExp && showKey === liveExp);
 
-    // Always re-fetch the experiment detail when (a) the key changed,
-    // or (b) we're viewing a live run — that's how new artifacts show
-    // up the moment they're written.
+    // Re-fetch when:
+    //   (a) the key changed (user picked something new), OR
+    //   (b) we're viewing the live exp (filesystem may have grown), OR
+    //   (c) the exp is fresh and the bible isn't yet written (give it
+    //       up to a few seconds to populate after the new dir appears).
     const keyChanged = showKey !== currentlyShownKey;
     if (showKey && (keyChanged || isLive)) {
       const detail = await loadExperimentDetail(showKey);
-      if (detail) renderExperimentDetail(detail, isLive);
+      if (detail) {
+        const fp = fingerprintDetail(detail);
+        // Always render on key change so videos for the new exp load.
+        // Otherwise only render when something visible actually grew —
+        // avoids tearing down the DOM (and resetting <video> playback)
+        // every 3s during a live run.
+        if (keyChanged || fp !== lastDetailFingerprint) {
+          renderExperimentDetail(detail, isLive);
+          lastDetailFingerprint = fp;
+        }
+      }
       currentlyShownKey = showKey;
     } else if (!showKey) {
       $('mainArea').innerHTML = '<div class="empty">No experiments yet — start a run to populate this view.</div>';
       currentlyShownKey = '';
+      lastDetailFingerprint = '';
     }
 
     $('meta').textContent =
