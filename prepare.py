@@ -1064,7 +1064,7 @@ def flux_image(
     request_id: str = submit.json()["id"]
 
     # Poll until ready (BFL jobs typically complete in 10–30 seconds).
-    for _ in range(180):          # up to 90 seconds
+    for _ in range(240):          # up to 120 seconds
         time.sleep(0.5)
         poll = httpx.get(
             "https://api.bfl.ml/v1/get_result",
@@ -1086,7 +1086,7 @@ def flux_image(
         # status is "Pending" or "Processing" — keep polling.
 
     raise RuntimeError(
-        f"FLUX ({model}) timed out after 90 seconds. id={request_id}"
+        f"FLUX ({model}) timed out after 120 seconds. id={request_id}"
     )
 
 

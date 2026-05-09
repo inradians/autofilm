@@ -25,6 +25,7 @@ import base64
 import json
 import os
 import threading
+import time
 from concurrent.futures import ALL_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path
 from typing import Any
@@ -54,6 +55,7 @@ from prepare import (
     gpt_image,
     nano_banana,
     plan_shot_durations,
+    prompt,
     route_shot,
     runway_image,
     stable_audio,
@@ -799,19 +801,27 @@ def _fetch_actor_photos(actor: str, n: int = 3) -> list[bytes]:
     results: list[dict] = []
 
     with _PHOTO_SEARCH_LOCK:
-        try:
-            with DDGS() as ddgs:
-                results = list(ddgs.images(
-                    f"{actor} actor official press portrait headshot",
-                    max_results=n * 4,
-                    safesearch="on",
-                ))
-        except Exception as e:
-            _tprint(f"    [photos] DDG search failed ({e}); skipping")
-            return []
-        finally:
-            import time as _time
-            _time.sleep(1.2)    # polite pause before next search
+        for attempt in range(4):
+            backoff = (2 ** attempt) * 1.5    # 1.5s → 3s → 6s → 12s
+            if attempt > 0:
+                _tprint(f"    [photos] rate-limited, retrying in {backoff:.0f}s "
+                        f"({attempt + 1}/4)...")
+                time.sleep(backoff)
+            try:
+                with DDGS() as ddgs:
+                    results = list(ddgs.images(
+                        f"{actor} actor official press portrait headshot",
+                        max_results=n * 4,
+                        safesearch="on",
+                    ))
+                break   # success
+            except Exception as e:
+                err = str(e)
+                is_rate_limit = "403" in err or "atelimit" in err
+                if attempt == 3 or not is_rate_limit:
+                    _tprint(f"    [photos] DDG failed after {attempt+1} attempt(s) ({e}); skipping")
+                    break
+        time.sleep(1.2)   # polite pause before releasing lock
 
     photos: list[bytes] = []
     for r in results:
@@ -900,8 +910,10 @@ def _generate_reference_composition(
          lambda: flux_image(get_rephrased())),
         ("flux-dev",
          lambda: flux_image(prompt_text, model=FLUX_DEV_MODEL)),
+        # Runway fallbacks — must use a valid Runway model name, not the BFL
+        # REFERENCE_IMAGE_MODEL constant which is "flux-pro-1.1".
         ("gemini_flash",
-         lambda: runway_image(prompt_text_no_name, model=REFERENCE_IMAGE_MODEL)),
+         lambda: runway_image(prompt_text_no_name, model=GEMINI_FLASH_MODEL)),
         ("nano_banana",
          lambda: nano_banana(prompt_text_no_name)),
     ]
@@ -976,11 +988,11 @@ def _generate_reference_lock(
         ("gemini_flash",
          lambda: runway_image(lock_prompt,
                               reference_images=refs, reference_tags=ref_tags,
-                              model=REFERENCE_IMAGE_MODEL)),
+                              model=GEMINI_FLASH_MODEL)),
         ("gemini_flash*",
          lambda: runway_image(get_rephrased_lock(),
                               reference_images=refs, reference_tags=ref_tags,
-                              model=REFERENCE_IMAGE_MODEL)),
+                              model=GEMINI_FLASH_MODEL)),
         ("nano_banana*",
          lambda: nano_banana(get_rephrased_lock(), reference_images=refs)),
         ("nano_banana",
