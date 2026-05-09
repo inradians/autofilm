@@ -241,32 +241,50 @@ def google_veo(
     first_frame: bytes | None = None,
     duration_seconds: int = 8,
     resolution: str = "720p",
+    reference_images: list[bytes] | None = None,
 ) -> bytes:
-    """Generate a video via Google Veo (AI Studio API).
+    """Generate a video via Google Veo 3.1 (AI Studio API).
 
-    Requires GOOGLE_AI_API_KEY. No Runway involved — not subject to
-    Runway's daily task limits.
+    Valid durations: 4, 6, or 8 seconds.
+    Constraints from Google docs:
+      - Must be 8 s when resolution is 1080p or 4k
+      - Must be 8 s when reference_images are provided
 
-    Veo 3.1 natively generates audio (dialogue, SFX, ambient). The
-    pipeline's veo_prompt already includes 'NO background music' so
-    Stability handles the score and Veo handles everything else.
-
-    Duration is capped at 8 seconds per clip — same as the Runway path.
-    Multi-segment shots are handled upstream by _render_shot_google().
+    Resolution strings: "720p" (default), "1080p", "4k".
     Returns MP4 bytes.
     """
     import tempfile
     from google.genai import types as _gtypes
 
-    aspect = "16:9"  # all our shots are 16:9; extend if you add portrait
+    _VEO_VALID_DURATIONS = [4, 6, 8]
+    _VEO_RESOLUTIONS = {"720p": "720p", "1080p": "1080p", "4k": "4k"}
 
-    config = _gtypes.GenerateVideosConfig(
-        number_of_videos=1,
-        duration_seconds=min(max(int(duration_seconds), 4), 8),
-        aspect_ratio=aspect,
-        enhance_prompt=False,   # we write our own prompts
-    )
+    res = _VEO_RESOLUTIONS.get(resolution, "720p")
 
+    # Snap to nearest valid duration
+    dur = min(_VEO_VALID_DURATIONS, key=lambda d: abs(d - int(duration_seconds)))
+
+    # Google requires 8 s when using 1080p, 4k, or reference images
+    if res in ("1080p", "4k") or reference_images:
+        dur = 8
+
+    config_kwargs: dict = {
+        "number_of_videos": 1,
+        "duration_seconds": dur,
+        "aspect_ratio":     "16:9",
+        "resolution":       res,
+        "enhance_prompt":   False,
+    }
+    if reference_images:
+        config_kwargs["reference_images"] = [
+            _gtypes.VideoGenerationReferenceImage(
+                image=_gtypes.Image(image_bytes=r, mime_type="image/png"),
+                reference_type="asset",
+            )
+            for r in reference_images[:3]
+        ]
+
+    config = _gtypes.GenerateVideosConfig(**config_kwargs)
     client = _genai_client()
     kwargs: dict = {"model": GOOGLE_VEO_MODEL, "prompt": prompt, "config": config}
 
@@ -277,8 +295,7 @@ def google_veo(
 
     operation = client.models.generate_videos(**kwargs)
 
-    # Poll until done (Veo typically 30–120 seconds)
-    for _ in range(120):        # up to 10 minutes
+    for _ in range(120):
         if operation.done:
             break
         time.sleep(5)
@@ -294,7 +311,7 @@ def google_veo(
         raise RuntimeError("Google Veo: no videos returned")
 
     video = vids[0].video
-    client.files.download(file=video)             # populate video.contents
+    client.files.download(file=video)
 
     with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
         tmp_path = tmp.name
