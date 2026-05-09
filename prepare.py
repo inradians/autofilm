@@ -1289,6 +1289,40 @@ def nano_banana(prompt: str, reference_images: list[bytes] | None = None) -> byt
     return runway_image(prompt, reference_images=reference_images, model=NANO_BANANA_MODEL)
 
 
+def gen4_image(
+    prompt: str,
+    reference_images: list[bytes],
+    turbo: bool = False,
+    ratio: str | None = None,
+) -> bytes:
+    """Runway Gen4 — purpose-built identity-lock image model.
+
+    Both gen4_image and gen4_image_turbo are Runway's strongest reference-
+    image models, designed specifically for preserving character / object
+    identity across shots. They differ in cost vs flexibility:
+      - gen4_image       (turbo=False): 5–8 credits, more flexible quality
+      - gen4_image_turbo (turbo=True):  2 credits, faster, refs REQUIRED
+
+    Both REQUIRE at least one reference image. For text-to-image without
+    refs, use gpt_image / nano_banana / flux_image instead.
+
+    Up to 3 reference images, tagged ref1/ref2/ref3 (referenceable as @ref1
+    etc. in the prompt).
+    """
+    if not reference_images:
+        raise RuntimeError(
+            "gen4_image requires at least one reference image. "
+            "Use gpt_image / nano_banana / flux_image for text-only."
+        )
+    model = GEN4_IMAGE_TURBO if turbo else GEN4_IMAGE_MODEL
+    return runway_image(
+        prompt,
+        reference_images=reference_images,
+        model=model,
+        ratio=ratio,
+    )
+
+
 @api_retry
 def seedance(
     prompt: str,

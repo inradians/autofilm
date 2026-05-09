@@ -61,6 +61,7 @@ from prepare import (
     extract_video_frame,
     ffmpeg,
     flux_image,
+    gen4_image,
     gpt_image,
     google_nano_banana,
     google_veo,
@@ -631,31 +632,31 @@ def _generate_video(
     )
 
 
-def _generate_image(
+def _generate_image_t2i(
     prompt: str,
-    ref_imgs: list[bytes],
-    moodboard: bytes | None,
     size: str = "1792x1024",
     quality: str = "high",
     context: str = "",
 ) -> bytes:
-    """Generate an image with automatic model fallback.
+    """Pure text-to-image. No reference images.
 
-    Attempt order:
-      1. GPT Image 2 (via Runway)            — best instruction-following
-      2. nano_banana + refs (via Runway)      — Runway fallback, accepts refs
-      3. Google Imagen 3                      — non-Runway fallback
+    Used to CREATE the source/canonical images (character references,
+    location moodboards, lookbook style frames, frame compositions).
+    These outputs are themselves what later identity-locked frames use as
+    refs — so this stage cannot rely on having refs available.
 
-    The rephrased prompt is generated once on first failure and reused for
-    subsequent attempts. Reference images and moodboard are passed to
-    nano_banana for visual consistency.
+    Chain (every model is text-to-image friendly):
+      1. gpt_image           Runway / GPT Image 2 (best instruction following)
+      2. openai_image        OpenAI direct                (OPENAI_API_KEY)
+      3. nano_banana         Runway / Imagen 3 text-to-image
+      4. nano_banana*        same, Claude-rephrased prompt
+         ↓ Runway daily limit hit, drop Runway-named attempts
+      5. google_nano_banana  Gemini 2.5 Flash Image direct (GOOGLE_AI_API_KEY)
+      6. reve_create         Reve text-to-image           (REVE_API_KEY)
+      7. flux-pro            BFL FLUX.1 Pro                (BFL_API_KEY)
 
-    Raises RuntimeError only if every model fails.
+    Raises RuntimeError only if every available model fails.
     """
-    refs = ref_imgs[:2]
-    if moodboard and len(refs) < 2:
-        refs = refs + [moodboard]
-
     runway_ok  = not _daily_limit_hit.is_set()
     rephrased: str | None = None
 
@@ -672,46 +673,31 @@ def _generate_image(
             ("gpt_image",
              lambda: gpt_image(prompt, size=size, quality=quality)),
             ("nano_banana",
-             lambda: nano_banana(prompt[:950],
-                                 reference_images=refs or None)),
+             lambda: nano_banana(prompt[:950])),
             ("nano_banana*",
-             lambda: nano_banana(_rephrase_prompt(prompt)[:950],
-                                 reference_images=refs or None)),
+             lambda: nano_banana(get_rephrased()[:950])),
         ]
 
-    # OpenAI direct — separate billing from Runway, independent daily limit.
     if os.environ.get("OPENAI_API_KEY"):
         attempts.insert(
-            1,  # always slot in as 2nd attempt, after gpt_image (Runway)
+            1,  # right after gpt_image (Runway)
             ("openai_image",
              lambda: openai_image(prompt, size="1536x1024", quality="medium")),
         )
 
-    # Google Nano Banana direct — same model as Runway's gemini_image3_pro
-    # but billed against GOOGLE_AI_API_KEY, not subject to Runway quotas.
     if os.environ.get("GOOGLE_AI_API_KEY"):
         attempts.append((
             "google_nano_banana",
-            lambda: google_nano_banana(prompt[:950],
-                                       reference_images=refs or None),
+            lambda: google_nano_banana(prompt[:950]),
         ))
 
-    # Reve Remix — ref-aware, non-Runway (REVE_API_KEY).
-    if os.environ.get("REVE_API_KEY") and refs:
+    if os.environ.get("REVE_API_KEY"):
         attempts.append((
-            "reve_remix",
-            lambda: reve_image(prompt, reference_images=refs,
-                               aspect_ratio="16:9"),
+            "reve_create",
+            lambda: reve_image(prompt, aspect_ratio="16:9"),
         ))
 
-    # BFL FLUX — last resort. FLUX.2 with refs when available; Pro otherwise.
     if os.environ.get("BFL_API_KEY"):
-        if refs:
-            attempts.append((
-                "flux-2-pro",
-                lambda: flux_image(prompt, reference_images=refs,
-                                   width=1344, height=768),
-            ))
         attempts.append((
             "flux-pro",
             lambda: flux_image(prompt, width=1344, height=768,
@@ -721,7 +707,7 @@ def _generate_image(
     last_exc: Exception | None = None
     for label, fn in attempts:
         try:
-            _tprint(f"    [{label}] image {context}")
+            _tprint(f"    [{label}] t2i {context}")
             result = fn()
             _tprint(f"    ✓ [{label}] {context} ({len(result)//1024}kB)")
             return result
@@ -735,7 +721,104 @@ def _generate_image(
             last_exc = e
 
     raise RuntimeError(
-        f"All image models failed for {context}. Last: {last_exc}"
+        f"All t2i image models failed for {context}. Last: {last_exc}"
+    )
+
+
+def _generate_image_with_refs(
+    prompt: str,
+    refs: list[bytes],
+    size: str = "1344x768",
+    quality: str = "high",
+    context: str = "",
+) -> bytes:
+    """Text + reference images — identity-locked image generation.
+
+    Used for FRAME generation where character / location identity must
+    be preserved from the canonical reference images created by
+    _generate_image_t2i(). Every model in the chain is reference-aware
+    and uses the refs to lock identity.
+
+    Chain (all models accept and use refs):
+      1. gen4_image+refs        Runway Gen4 (purpose-built ID lock)
+      2. nano_banana+refs       Runway / Imagen 3 with refs
+      3. nano_banana*+refs      same, rephrased prompt
+      4. gen4_image_turbo+refs  Runway Gen4 Turbo (cheaper)
+         ↓ Runway daily limit hit, drop Runway-named attempts
+      5. google_nano_banana+refs Gemini 2.5 Flash Image direct (GOOGLE_AI_API_KEY)
+      6. reve_remix+refs        Reve remix, up to 6 refs    (REVE_API_KEY)
+      7. flux-2-pro+refs        BFL FLUX.2 multi-ref         (BFL_API_KEY)
+
+    Raises RuntimeError only if every available model fails. If `refs`
+    is empty, raises immediately — use _generate_image_t2i() instead.
+    """
+    if not refs:
+        raise RuntimeError(
+            "_generate_image_with_refs requires at least one reference image. "
+            "Use _generate_image_t2i() for text-only generation."
+        )
+
+    runway_ok  = not _daily_limit_hit.is_set()
+    rephrased: str | None = None
+
+    def get_rephrased() -> str:
+        nonlocal rephrased
+        if rephrased is None:
+            rephrased = _rephrase_prompt(prompt)
+        return rephrased
+
+    attempts: list[tuple[str, Any]] = []
+
+    if runway_ok:
+        attempts += [
+            ("gen4_image",
+             lambda: gen4_image(prompt[:950], reference_images=refs)),
+            ("nano_banana",
+             lambda: nano_banana(prompt[:950], reference_images=refs)),
+            ("nano_banana*",
+             lambda: nano_banana(get_rephrased()[:950], reference_images=refs)),
+            ("gen4_image_turbo",
+             lambda: gen4_image(prompt[:950], reference_images=refs, turbo=True)),
+        ]
+
+    if os.environ.get("GOOGLE_AI_API_KEY"):
+        attempts.append((
+            "google_nano_banana",
+            lambda: google_nano_banana(prompt[:950], reference_images=refs),
+        ))
+
+    if os.environ.get("REVE_API_KEY"):
+        attempts.append((
+            "reve_remix",
+            lambda: reve_image(prompt, reference_images=refs,
+                               aspect_ratio="16:9"),
+        ))
+
+    if os.environ.get("BFL_API_KEY"):
+        attempts.append((
+            "flux-2-pro",
+            lambda: flux_image(prompt, reference_images=refs,
+                               width=1344, height=768),
+        ))
+
+    last_exc: Exception | None = None
+    for label, fn in attempts:
+        try:
+            _tprint(f"    [{label}] image+refs {context}")
+            result = fn()
+            _tprint(f"    ✓ [{label}] {context} ({len(result)//1024}kB)")
+            return result
+        except Exception as e:  # noqa: BLE001
+            if _is_daily_limit(e):
+                _record_daily_limit(e, context)
+                runway_ok = False
+                attempts = [(l, f) for l, f in attempts
+                            if not l.startswith(("gen4_image", "nano_banana"))]
+            _tprint(f"    ✗ [{label}] {context}: {e}")
+            last_exc = e
+
+    raise RuntimeError(
+        f"All ref-aware image models failed for {context}. Last: {last_exc}"
     )
 
 
@@ -763,16 +846,23 @@ def _generate_moodboard(prompt_text: str, slug: str,
                         ref_imgs: list[bytes] | None = None) -> bytes:
     """Generate a location moodboard image.
 
-    Delegates to _generate_image() so moodboards use the same fallback
-    chain as scene frames — including nano_banana with refs,
-    google_nano_banana, reve, flux-2-pro, and flux-pro. When ref_imgs are
-    provided (e.g. a previously generated style frame or earlier
-    moodboard), they're passed to the ref-aware models in the chain.
+    Moodboards are themselves reference material — they're created from
+    text alone and later passed AS refs into frame generation. So this
+    delegates to the t2i function (no refs in the chain). If ref_imgs is
+    provided (e.g. a previously generated style frame to maintain
+    cross-location visual consistency), it switches to the ref-aware
+    chain instead.
     """
-    return _generate_image(
+    if ref_imgs:
+        return _generate_image_with_refs(
+            prompt=prompt_text,
+            refs=ref_imgs,
+            size="1792x1024",
+            quality="high",
+            context=f"moodboard/{slug}",
+        )
+    return _generate_image_t2i(
         prompt=prompt_text,
-        ref_imgs=ref_imgs or [],
-        moodboard=None,
         size="1792x1024",
         quality="high",
         context=f"moodboard/{slug}",
@@ -990,7 +1080,12 @@ def build_lookbook(exp: Experiment, script: dict, locations: list[dict]) -> dict
 
     # Render the iconic style frame.
     try:
-        sf = gpt_image(lookbook["style_frame_prompt"], size="1792x1024", quality="high")
+        sf = _generate_image_t2i(
+            prompt=lookbook["style_frame_prompt"],
+            size="1792x1024",
+            quality="high",
+            context="lookbook/style_frame",
+        )
         exp.write_bytes("lookbook/style_frame.png", sf)
     except Exception as e:  # noqa: BLE001
         print(f"  Style frame failed: {e}")
@@ -1102,10 +1197,8 @@ def build_references(exp: Experiment, script: dict, cast: list[dict],
                 scene_moodboard = Path(mb_paths[0]).read_bytes()
 
         try:
-            img = _generate_image(
+            img = _generate_image_t2i(
                 prompt=ref_prompt,
-                ref_imgs=[],
-                moodboard=scene_moodboard,
                 size="1344x768",
                 quality="standard",
                 context=f"reference {cid}/{scene_id}",
@@ -1395,10 +1488,8 @@ def build_first_frames(exp: Experiment, script: dict, cast: list[dict],
                 scene_moodboard = Path(mb_paths[0]).read_bytes()
 
         try:
-            composition = _generate_image(
+            composition = _generate_image_t2i(
                 prompt=ff_prompt,
-                ref_imgs=[],              # refs added in lock step below
-                moodboard=scene_moodboard,
                 size="1792x1024",
                 quality="high",
                 context=f"frame {scene_id}/{shot_id}",
@@ -1425,12 +1516,17 @@ def build_first_frames(exp: Experiment, script: dict, cast: list[dict],
             if rp.exists():
                 ref_imgs.append(rp.read_bytes())
 
-        if ref_imgs:
+        # Include scene moodboard as the last ref slot for color/atmosphere
+        # consistency. Total still <= 3 for Runway models (chars first).
+        all_refs = ref_imgs[:2]
+        if scene_moodboard and len(all_refs) < 3:
+            all_refs.append(scene_moodboard)
+
+        if all_refs:
             try:
-                final = _generate_image(
+                final = _generate_image_with_refs(
                     prompt=nano_prompt,       # compact prompt for Runway models
-                    ref_imgs=ref_imgs,
-                    moodboard=scene_moodboard,
+                    refs=all_refs,
                     size="1344x768",
                     quality="standard",
                     context=f"frame_lock {scene_id}/{shot_id}",
