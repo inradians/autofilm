@@ -32,8 +32,6 @@ from typing import Any
 
 from prepare import (
     Experiment,
-    FLUX_DEV_MODEL,
-    FLUX_PRO_MODEL,
     GEMINI_FLASH_MODEL,
     GEN4_IMAGE_MODEL,
     GOOGLE_IMAGE_MODEL,
@@ -46,6 +44,7 @@ from prepare import (
     MAX_PLANNED_SHOT_SECONDS,
     MAX_SCENES,
     NANO_BANANA_MODEL,
+    REVE_API_BASE,
     SEEDANCE2_MODEL,
     SHOT_DURATION_SECONDS,
     TAKES_PER_SHOT,
@@ -58,10 +57,8 @@ from prepare import (
     elevenlabs_sfx,
     extract_video_frame,
     ffmpeg,
-    flux_image,
-    google_imagen,
-    google_veo,
     gpt_image,
+    google_veo,
     ltx_video,
     nano_banana,
     plan_shot_durations,
@@ -666,47 +663,20 @@ def _generate_image(
 
     if runway_ok:
         attempts += [
-            ("gpt_image",
-             lambda: gpt_image(prompt, size=size, quality=quality)),
-            ("gpt_image*",
-             lambda: gpt_image(get_rephrased(), size=size, quality="standard")),
             ("nano_banana",
              lambda: nano_banana(prompt[:950],
                                  reference_images=refs or None)),
             ("nano_banana*",
-             lambda: nano_banana(get_rephrased()[:950],
+             lambda: nano_banana(_rephrase_prompt(prompt)[:950],
                                  reference_images=refs or None)),
         ]
 
-    if os.environ.get("GOOGLE_AI_API_KEY"):
+    # Reve Remix — ref-aware, non-Runway (REVE_API_KEY).
+    if os.environ.get("REVE_API_KEY") and refs:
         attempts.append((
-            "google_imagen",
-            lambda: google_imagen(prompt[:1000], "16:9"),
-        ))
-
-    # Reve — api.reve.com. Remix uses reference images natively (up to 6),
-    # making it the best non-Runway option for character/moodboard consistency.
-    if os.environ.get("REVE_API_KEY"):
-        if refs:
-            attempts.append((
-                "reve_remix",
-                lambda: reve_image(prompt, reference_images=refs,
-                                   aspect_ratio="16:9"),
-            ))
-        attempts.append((
-            "reve_create",
-            lambda: reve_image(prompt, aspect_ratio="16:9"),
-        ))
-
-    # BFL FLUX — last resort. Pro first, Dev as final fallback.
-    if os.environ.get("BFL_API_KEY"):
-        attempts.append((
-            "flux-pro",
-            lambda: flux_image(prompt, model=FLUX_PRO_MODEL),
-        ))
-        attempts.append((
-            "flux-dev",
-            lambda: flux_image(prompt, model=FLUX_DEV_MODEL),
+            "reve_remix",
+            lambda: reve_image(prompt, reference_images=refs,
+                               aspect_ratio="16:9"),
         ))
 
     last_exc: Exception | None = None
@@ -721,7 +691,7 @@ def _generate_image(
                 _record_daily_limit(e, context)
                 runway_ok = False
                 attempts = [(l, f) for l, f in attempts
-                            if not l.startswith(("gpt_image", "nano_banana"))]
+                            if not l.startswith("nano_banana")]
             _tprint(f"    ✗ [{label}] {context}: {e}")
             last_exc = e
 
