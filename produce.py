@@ -1255,17 +1255,41 @@ def build_storyboard(exp: Experiment, script: dict) -> dict:
 # STAGE 6 — Music per scene
 # ============================================================================
 
-def build_music(exp: Experiment, script: dict) -> None:
+def build_music(exp: Experiment, script: dict, storyboard: dict) -> None:
+    """Generate one Stability music cue per scene.
+
+    Duration is calculated from the storyboard so the cue spans the full
+    scene (all shots) rather than a hardcoded 30 seconds. A small buffer
+    is added so music can bleed naturally across the cut into the next
+    scene without an abrupt silence. Stable Audio caps at 47 seconds;
+    compile_final will loop any cue shorter than the scene if needed.
+
+    ``storyboard`` maps scene_id → list of shot dicts with
+    ``duration_seconds`` fields.
+    """
+    # Maximum Stable Audio can generate in one call.
+    _STABLE_AUDIO_MAX_SECONDS = 47
+    # Extra seconds to pad beyond the shot-sum so music bleeds across the
+    # cut to the next shot / scene without running dry.
+    _CROSSSHOT_BUFFER_SECONDS = 6
+
+    def _scene_duration(scene_id: str) -> int:
+        shots = storyboard.get(scene_id, [])
+        shot_sum = sum(s.get("duration_seconds", SHOT_DURATION_SECONDS) for s in shots)
+        # Pad for crossfades and cross-shot bleed; cap at Stable Audio max.
+        return min(shot_sum + _CROSSSHOT_BUFFER_SECONDS, _STABLE_AUDIO_MAX_SECONDS)
+
     def _do_music(scene: dict) -> None:
-        scene_id = scene["id"]
-        out_path = exp.path(f"music/{scene_id}.wav")
+        scene_id  = scene["id"]
+        out_path  = exp.path(f"music/{scene_id}.wav")
+        duration  = _scene_duration(scene_id)
         music_prompt = (
             f"{MUSIC_STYLE}. Scene mood: {scene.get('mood', '')}. "
             f"{scene.get('summary', '')[:200]}"
         )
         if not out_path.exists():
             try:
-                audio = stable_audio(music_prompt, duration_seconds=30)
+                audio = stable_audio(music_prompt, duration_seconds=duration)
                 out_path.write_bytes(audio)
             except Exception as e:  # noqa: BLE001
                 _tprint(f"  Music {scene_id} failed: {e}")
@@ -1275,7 +1299,7 @@ def build_music(exp: Experiment, script: dict) -> None:
             prompt=music_prompt,
             stage="music",
             scene=scene_id,
-            duration_seconds=30,
+            duration_seconds=duration,
         )
 
     _tprint(f"  Generating {len(script['scenes'])} music cue(s) "
@@ -1467,6 +1491,8 @@ def veo_prompt(lookbook: dict, shot: dict, scene: dict,
         f"{dialogue_block}"
         f"AMBIENT: {scene.get('mood', '')} mood, {scene['location']}, "
         f"{scene.get('time_of_day', 'day')}.\n"
+        f"AUDIO: Natural ambient sound and dialogue only. "
+        f"NO background music. NO score. NO soundtrack. NO musical instruments.\n"
         f"{take_var}\n"
         f"24fps, anamorphic, fine grain."
     )
@@ -1951,9 +1977,16 @@ def compile_final(exp: Experiment, script: dict, storyboard: dict,
         music_path = exp.path(f"music/{scene_id}.wav")
         if music_path.exists():
             m = _volume(AudioFileClip(str(music_path)), 0.20)
-            m = (_loop_to(m, scene_video.duration)
-                 if m.duration < scene_video.duration
-                 else _subclip(m, 0, scene_video.duration))
+            if m.duration < scene_video.duration:
+                # Music is shorter than the scene — loop it to fill.
+                m = _loop_to(m, scene_video.duration)
+            # If music is longer than the scene (because of the cross-shot
+            # buffer added during generation), don't hard-cut it — let it
+            # fade out over 2 seconds at the scene boundary so it bleeds
+            # naturally across the cut into the next scene.
+            elif m.duration > scene_video.duration:
+                fade_end = min(m.duration, scene_video.duration + 2.0)
+                m = _subclip(m, 0, fade_end)
             layers.append(m)
         if layers:
             scene_video = _set_audio(scene_video, CompositeAudioClip(layers))
@@ -2025,7 +2058,7 @@ def run(exp: Experiment) -> Path:
     print(f"  → {n_shots} shots")
 
     print(f"[{exp.exp_id}] Stage 6: music")
-    build_music(exp, script)
+    build_music(exp, script, storyboard)
 
     print(f"[{exp.exp_id}] Stage 7: first frames")
     build_first_frames(exp, script, cast, locations, lookbook, storyboard)
