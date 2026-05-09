@@ -267,26 +267,37 @@ def build_production_bible_json(exp: Experiment) -> Path:
             "size_bytes":     final.stat().st_size,
         }
 
-    # ── Captured config (snapshotted from produce.py constants) ────────
-    # Read from this experiment's snapshotted produce.py to get the exact
-    # values used for THIS run, not the current produce.py on disk.
-    config_keys = (
-        "DIRECTOR", "CINEMATOGRAPHER", "MUSIC_STYLE", "LOOKBOOK_STYLE_KEYWORDS",
-        "LOOKBOOK_GRADE", "TAKES_PER_SHOT", "SHOT_DURATION_SECONDS",
-        "VIDEO_BACKEND", "IMAGE_BACKEND", "MAX_WORKERS", "VEO_TIER",
-    )
+    # ── Captured config (snapshotted from produce.py constants + runtime) ──
+    # Read from this experiment's snapshotted produce.py for produce.py-defined
+    # values, and from the prepare module for prepare.py-defined values
+    # (which are shared, version-controlled, and never agent-modified).
+    cfg: dict[str, Any] = {}
     snapshot = root / "produce.py"
     if snapshot.exists():
         src = snapshot.read_text()
-        cfg: dict[str, Any] = {}
-        for key in config_keys:
-            # crude line-grep — looks for top-level assignment.
+        # produce.py-level constants (top-level assignments).
+        # Match plain `KEY = ...`, `KEY=...`, and type-annotated `KEY: type = ...`.
+        for key in ("DIRECTOR", "CINEMATOGRAPHER", "MUSIC_STYLE",
+                    "LOOKBOOK_STYLE_KEYWORDS", "LOOKBOOK_GRADE",
+                    "VIDEO_BACKEND", "IMAGE_BACKEND", "MAX_WORKERS"):
             for line in src.splitlines():
                 stripped = line.strip()
-                if stripped.startswith(f"{key} ") or stripped.startswith(f"{key}="):
-                    cfg[key] = stripped[:240]   # store the literal source line
+                if (stripped.startswith(f"{key} ")
+                        or stripped.startswith(f"{key}=")
+                        or stripped.startswith(f"{key}:")):
+                    cfg[key] = stripped[:240]
                     break
-        bible["config"] = cfg
+    # prepare.py-defined runtime constants — these are constants used by the
+    # pipeline that aren't redefined per-experiment, so reading the live
+    # module is correct.
+    try:
+        import prepare as _prepare
+        for key in ("TAKES_PER_SHOT", "SHOT_DURATION_SECONDS", "VEO_TIER"):
+            if hasattr(_prepare, key):
+                cfg[key] = getattr(_prepare, key)
+    except Exception:  # noqa: BLE001
+        pass
+    bible["config"] = cfg
 
     # ── Metric (if evaluated) ──────────────────────────────────────────
     if exp.has("metric.json"):

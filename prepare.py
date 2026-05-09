@@ -1046,11 +1046,16 @@ class Experiment:
             for src in src_dir.rglob("*"):
                 if not src.is_file():
                     continue
-                rel = src.relative_to(prev_exp.root)
-                key = key_pattern(rel)
+                # Path relative to *the dir* for key lookup (e.g. for
+                # frames/scene_001/shot_001.png, key_rel.parts is
+                # ('scene_001', 'shot_001.png')). Path relative to *the
+                # exp root* for the actual copy destination.
+                key_rel  = src.relative_to(src_dir)
+                copy_rel = src.relative_to(prev_exp.root)
+                key = key_pattern(key_rel)
                 if key and key in regen_set:
                     continue
-                _copy_one(src, root / rel)
+                _copy_one(src, root / copy_rel)
 
         # Lookbook subdir (style_frame.png) — all-or-nothing.
         if not carryover.get("regen_lookbook"):
@@ -1065,7 +1070,7 @@ class Experiment:
                 shutil.copytree(mb_src, root / "location_moodboards", dirs_exist_ok=True)
 
         # References: layout = references/{char_id}/{scene_id}.png
-        # Carryover key = (scene_id, char_id) per the schema.
+        # key_rel = char_id/{scene_id}.png; carryover key = (scene_id, char_id)
         _copy_filtered_dir(
             "references",
             carryover.get("regen_references"),
@@ -1074,6 +1079,7 @@ class Experiment:
         )
 
         # Music: layout = music/{scene_id}.wav
+        # key_rel = {scene_id}.wav
         _copy_filtered_dir(
             "music",
             carryover.get("regen_music"),
@@ -1090,6 +1096,7 @@ class Experiment:
         )
 
         # Frames: layout = frames/{scene_id}/{shot_id}.png
+        # key_rel = scene_id/{shot_id}.png; carryover key = (scene_id, shot_id)
         _copy_filtered_dir(
             "frames",
             carryover.get("regen_frames"),
@@ -1098,6 +1105,7 @@ class Experiment:
         )
 
         # Clips: layout = clips/{scene_id}/{shot_id}/take_N.mp4
+        # key_rel = scene_id/shot_id/take_N.mp4; key = (scene_id, shot_id)
         _copy_filtered_dir(
             "clips",
             carryover.get("regen_clips"),

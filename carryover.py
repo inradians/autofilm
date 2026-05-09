@@ -296,6 +296,25 @@ def plan_carryover(
         else:
             plan["manual_review"].append(change)
 
+    # Cascade rules — keep in sync with Experiment.new_iteration:
+    #   regen_script    → cascades everything
+    #   regen_lookbook  → cascades references + frames + clips
+    # Apply here so the plan dict accurately reflects what will happen.
+    if plan["regen_script"]:
+        plan["regen_cast"]       = True
+        plan["regen_lookbook"]   = True
+        plan["regen_storyboard"] = True
+        plan["regen_references"] = "all"
+        plan["regen_music"]      = "all"
+        plan["regen_narration"]  = "all"
+        plan["regen_frames"]     = "all"
+        plan["regen_clips"]      = "all"
+        plan["regen_edl"]        = True
+    if plan["regen_lookbook"]:
+        plan["regen_references"] = "all"
+        plan["regen_frames"]     = "all"
+        plan["regen_clips"]      = "all"
+
     return plan
 
 
