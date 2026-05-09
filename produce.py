@@ -139,12 +139,47 @@ MUSIC_STYLE = (
 # ============================================================================
 
 # How many image/video/audio generation tasks to run in parallel.
-# Each task holds a live Runway API call polling for completion, so the
-# effective limit is whatever Runway allows concurrently on your account.
-# Runway's default tier permits only ONE in-flight task per account, so
-# this defaults to 1 — set MAX_WORKERS=N in the env if your account is
-# on a higher tier or you're routing video/image to non-Runway backends.
-MAX_WORKERS: int = int(os.getenv("MAX_WORKERS", "1"))
+#
+# Runway's default tier splits its concurrency budget by media category:
+#   - video: 1 concurrent task per account
+#   - image: 2 concurrent tasks per account
+#   - audio: 1 concurrent task per account (sound_effect, text_to_speech)
+#
+# So we keep one knob per category. ``MAX_WORKERS`` is the overall cap
+# and per-category fallback. Override individually for higher Runway
+# tiers or when routing specific stages to non-Runway backends (LTX,
+# BFL, Reve, Stability, Google all have their own limits).
+MAX_WORKERS:       int = int(os.getenv("MAX_WORKERS",       "1"))
+MAX_WORKERS_IMAGE: int = int(os.getenv("MAX_WORKERS_IMAGE", "2"))
+MAX_WORKERS_VIDEO: int = int(os.getenv("MAX_WORKERS_VIDEO", "1"))
+MAX_WORKERS_AUDIO: int = int(os.getenv("MAX_WORKERS_AUDIO", "1"))
+
+# Map _parallel_run labels → category. Adding a new pipeline stage
+# means adding it here so the runner picks the right concurrency cap.
+_LABEL_CATEGORY: dict[str, str] = {
+    "moodboard":   "image",
+    "reference":   "image",
+    "first_frame": "image",
+    "style_frame": "image",
+    "music":       "audio",
+    "narration":   "audio",
+    "video_take":  "video",
+    "clip":        "video",
+}
+
+
+def _workers_for(label: str) -> int:
+    """Pick concurrency cap for a stage label.
+
+    Falls back to the overall MAX_WORKERS when the label has no entry
+    in _LABEL_CATEGORY (so ad-hoc parallel stages still work) — that
+    way an unmapped label is conservative, not over-eager.
+    """
+    cat = _LABEL_CATEGORY.get(label)
+    if cat == "image": return MAX_WORKERS_IMAGE
+    if cat == "video": return MAX_WORKERS_VIDEO
+    if cat == "audio": return MAX_WORKERS_AUDIO
+    return MAX_WORKERS
 
 # Generation backend selector. Set in .env or shell to switch away from
 # the default without changing any other code.
@@ -228,15 +263,17 @@ def _parallel_run(
 
     Args:
         label:      Short stage name used in progress and failure messages.
+                    Determines the concurrency cap via _LABEL_CATEGORY
+                    (image=2, video=1, audio=1 by default).
         work_items: One argument per worker_fn call.
         worker_fn:  Thread-safe callable; receives one item, returns a result.
-        workers:    Pool size override. Defaults to MAX_WORKERS.
+        workers:    Pool size override. Defaults to the per-label cap.
 
     Returns:
         List of successful return values (order matches completion order,
         not input order). Failed items are logged and omitted.
     """
-    n = workers if workers is not None else MAX_WORKERS
+    n = workers if workers is not None else _workers_for(label)
 
     # ── Serial path ──────────────────────────────────────────────────────
     if n <= 1 or len(work_items) <= 1:
@@ -1084,9 +1121,10 @@ def cast_and_locations(exp: Experiment, script: dict) -> tuple[list[dict], list[
         )
         loc["moodboard_paths"] = [str(p) for p in out_path.parent.glob("*.png")]
 
+    _n_mb = _workers_for('moodboard')
     _tprint(f"  Generating {len(locations)} moodboard(s) "
-            f"({'parallel' if MAX_WORKERS > 1 else 'serial'}, "
-            f"MAX_WORKERS={MAX_WORKERS})...")
+            f"({'parallel' if _n_mb > 1 else 'serial'}, "
+            f"workers={_n_mb})...")
     _parallel_run("moodboard", locations, _do_moodboard)
 
     exp.write_json("locations.json", locations)
@@ -1369,9 +1407,10 @@ def build_references(exp: Experiment, script: dict, cast: list[dict],
             _tprint(f"  ⚠ Reference failed for {cid}/{scene_id}: {e}")
             return None
 
+    _n_ref = _workers_for('reference')
     _tprint(f"  Generating {len(work_items)} reference image(s) "
-            f"({'parallel' if MAX_WORKERS > 1 else 'serial'}, "
-            f"MAX_WORKERS={MAX_WORKERS})...")
+            f"({'parallel' if _n_ref > 1 else 'serial'}, "
+            f"workers={_n_ref})...")
     for result in _parallel_run("reference", work_items, _do_reference):
         if result:
             scene_id, cid, path = result
@@ -1547,8 +1586,9 @@ def build_music(exp: Experiment, script: dict, storyboard: dict) -> None:
             duration_seconds=duration,
         )
 
+    _n_mu = _workers_for('music')
     _tprint(f"  Generating {len(script['scenes'])} music cue(s) "
-            f"({'parallel' if MAX_WORKERS > 1 else 'serial'})...")
+            f"({'parallel' if _n_mu > 1 else 'serial'}, workers={_n_mu})...")
     _parallel_run("music", script["scenes"], _do_music)
 
 
@@ -1656,8 +1696,9 @@ def build_narration(exp: Experiment, script: dict, cast: list[dict]) -> None:
     if n_with_narration == 0:
         _tprint("  No narration in script — skipping TTS stage.")
         return
+    _n_na = _workers_for('narration')
     _tprint(f"  Generating narration for {n_with_narration} scene(s) "
-            f"({'parallel' if MAX_WORKERS > 1 else 'serial'})...")
+            f"({'parallel' if _n_na > 1 else 'serial'}, workers={_n_na})...")
     _parallel_run("narration", script["scenes"], _do_narration)
 
 
@@ -1804,9 +1845,10 @@ def build_first_frames(exp: Experiment, script: dict, cast: list[dict],
         out_path.write_bytes(final)
         return scene_id, shot_id, str(out_path)
 
+    _n_ff = _workers_for('first_frame')
     _tprint(f"  Generating {len(work_items)} first frame(s) "
-            f"({'parallel' if MAX_WORKERS > 1 else 'serial'}, "
-            f"MAX_WORKERS={MAX_WORKERS})...")
+            f"({'parallel' if _n_ff > 1 else 'serial'}, "
+            f"workers={_n_ff})...")
     for result in _parallel_run("first_frame", work_items, _do_first_frame):
         if result:
             scene_id, shot_id, path = result
@@ -1987,9 +2029,10 @@ def build_video(exp: Experiment, script: dict, cast: list[dict],
             _tprint(f"  Take {scene_id}/{shot_id}/{take_idx + 1} failed: {e}")
             return None
 
+    _n_vt = _workers_for('video_take')
     _tprint(f"  Generating {len(work_items)} take(s) "
-            f"({'parallel' if MAX_WORKERS > 1 else 'serial'}, "
-            f"MAX_WORKERS={MAX_WORKERS})...")
+            f"({'parallel' if _n_vt > 1 else 'serial'}, "
+            f"workers={_n_vt})...")
     for result in _parallel_run("video_take", work_items, _do_take):
         if result:
             scene_id, shot_id, path = result

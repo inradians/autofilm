@@ -300,7 +300,9 @@ def build_production_bible_dict(exp: Experiment) -> dict[str, Any]:
         # Match plain `KEY = ...`, `KEY=...`, and type-annotated `KEY: type = ...`.
         for key in ("DIRECTOR", "CINEMATOGRAPHER", "MUSIC_STYLE",
                     "LOOKBOOK_STYLE_KEYWORDS", "LOOKBOOK_GRADE",
-                    "VIDEO_BACKEND", "IMAGE_BACKEND", "MAX_WORKERS"):
+                    "VIDEO_BACKEND", "IMAGE_BACKEND",
+                    "MAX_WORKERS", "MAX_WORKERS_IMAGE",
+                    "MAX_WORKERS_VIDEO", "MAX_WORKERS_AUDIO"):
             for line in src.splitlines():
                 stripped = line.strip()
                 if (stripped.startswith(f"{key} ")
