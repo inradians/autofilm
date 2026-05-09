@@ -38,6 +38,8 @@ from prepare import (
     GOOGLE_VEO_MODEL,
     GPT_IMAGE_MODEL,
     LTX_API_BASE,
+    LTX_FAST_MODEL,
+    LTX_PRO_MODEL,
     LTX_VIDEO_MODEL,
     MAX_PLANNED_SHOT_SECONDS,
     MAX_SCENES,
@@ -574,13 +576,22 @@ def _generate_video(
                         duration_seconds=duration, seed=seed),
         ))
 
-    # Non-Runway fallbacks — always available regardless of Runway limits
+    # Non-Runway fallbacks — always available regardless of Runway limits.
+    # Both LTX models are tried: Pro first (quality), Fast second (speed/fallback).
     if os.environ.get("LTX_API_KEY"):
         attempts.append((
-            "ltx",
+            "ltx-2-3-pro",
             lambda: ltx_video(prompt, first_frame,
                                duration_seconds=duration,
-                               resolution="720p", seed=seed),
+                               resolution="720p", seed=seed,
+                               model=LTX_PRO_MODEL),
+        ))
+        attempts.append((
+            "ltx-2-3-fast",
+            lambda: ltx_video(prompt, first_frame,
+                               duration_seconds=duration,
+                               resolution="720p", seed=seed,
+                               model=LTX_FAST_MODEL),
         ))
     if os.environ.get("GOOGLE_AI_API_KEY"):
         attempts.append((

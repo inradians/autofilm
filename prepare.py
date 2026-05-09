@@ -112,7 +112,26 @@ GOOGLE_IMAGE_MODEL = "imagen-3.0-generate-002"
 # ltx-2-3-pro  → best quality, all endpoints, ~$0.05-0.12/s @ 720p
 # ltx-2-3-fast → rapid iteration, text-to-video + image-to-video only
 LTX_API_BASE    = "https://api.ltx.video"
-LTX_VIDEO_MODEL = os.getenv("LTX_VIDEO_MODEL", "ltx-2-3-pro")
+# ltx-2-3-pro:  best quality, durations 6/8/10s, all endpoints
+# ltx-2-3-fast: faster/cheaper, durations 6/8/10/12/14/16/18/20s
+LTX_PRO_MODEL   = "ltx-2-3-pro"
+LTX_FAST_MODEL  = "ltx-2-3-fast"
+LTX_VIDEO_MODEL = os.getenv("LTX_VIDEO_MODEL", LTX_PRO_MODEL)
+
+# Valid durations per LTX model (must be an exact match)
+_LTX_DURATIONS: dict[str, list[int]] = {
+    LTX_PRO_MODEL:  [6, 8, 10],
+    LTX_FAST_MODEL: [6, 8, 10, 12, 14, 16, 18, 20],
+    "ltx-2-pro":    [5, 9, 13, 17, 21],
+    "ltx-2-fast":   [5, 9, 13, 17, 21],
+}
+# Valid resolutions for LTX API (width x height strings)
+_LTX_RESOLUTIONS: dict[str, str] = {
+    "720p":  "1280x720",
+    "1080p": "1920x1080",
+    "1440p": "2560x1440",
+    "4k":    "3840x2160",
+}
 
 
 @lru_cache(maxsize=1)
@@ -221,30 +240,42 @@ def ltx_video(
     duration_seconds: int = 8,
     resolution: str = "720p",
     seed: int | None = None,
+    model: str | None = None,
+    generate_audio: bool = True,
+    camera_motion: str | None = None,
 ) -> bytes:
     """Generate video via LTX 2.3 (Lightricks API, api.ltx.video).
 
-    Uses /v2/image-to-video when first_frame is provided,
-    /v2/text-to-video otherwise. The first frame is sent as a base64
-    data URI (supports up to ~5 MB raw; typical PNG frames are <2 MB).
+    Models:
+        ltx-2-3-pro   quality, durations 6/8/10 s, all endpoints
+        ltx-2-3-fast  speed,   durations 6-20 s in 2 s steps, cheaper
 
-    No Runway involved. Requires LTX_API_KEY from console.ltx.video.
-    Returns MP4 bytes.
+    generate_audio=True (default) produces native synchronized audio —
+    dialogue, ambient, and SFX. The pipeline's veo_prompt suppresses
+    music so Stability still owns the score.
+
+    Requires LTX_API_KEY from console.ltx.video. Returns MP4 bytes.
     """
-    api_key = _require_key("LTX_API_KEY")
-    auth    = {"Authorization": f"Bearer {api_key}"}
+    api_key   = _require_key("LTX_API_KEY")
+    auth      = {"Authorization": f"Bearer {api_key}"}
+    use_model = model or LTX_VIDEO_MODEL
 
-    res_map = {"720p": "1280x720", "1080p": "1920x1080", "480p": "848x480"}
-    res_str = res_map.get(resolution, "1280x720")
+    # Snap to nearest valid duration for this model
+    valid_durs = _LTX_DURATIONS.get(use_model, [6, 8, 10])
+    duration   = min(valid_durs, key=lambda d: abs(d - duration_seconds))
+    res_str    = _LTX_RESOLUTIONS.get(resolution, "1280x720")
 
     body: dict = {
-        "prompt":     prompt,
-        "model":      LTX_VIDEO_MODEL,
-        "duration":   min(max(int(duration_seconds), 1), 20),
-        "resolution": res_str,
+        "prompt":         prompt[:5000],
+        "model":          use_model,
+        "duration":       duration,
+        "resolution":     res_str,
+        "generate_audio": generate_audio,
     }
     if seed is not None:
         body["seed"] = seed
+    if camera_motion:
+        body["camera_motion"] = camera_motion
 
     if first_frame:
         import base64 as _b64
@@ -254,7 +285,6 @@ def ltx_video(
     else:
         endpoint = "text-to-video"
 
-    # Submit async job (/v2 recommended — avoids long-connection timeouts)
     submit = httpx.post(
         f"{LTX_API_BASE}/v2/{endpoint}",
         headers={**auth, "Content-Type": "application/json"},
@@ -270,26 +300,21 @@ def ltx_video(
 
     job_id: str = submit.json()["id"]
 
-    # Poll every 5 s as the docs recommend, up to 10 minutes
-    for _ in range(120):
+    for _ in range(120):   # poll every 5 s, up to 10 min
         time.sleep(5)
         poll = httpx.get(
             f"{LTX_API_BASE}/v2/{endpoint}/{job_id}",
-            headers=auth,
-            timeout=30.0,
+            headers=auth, timeout=30.0,
         )
         poll.raise_for_status()
         data = poll.json()
         if data["status"] == "completed":
-            video_url: str = data["result"]["video_url"]
-            return httpx.get(video_url, timeout=120.0).content
+            return httpx.get(data["result"]["video_url"], timeout=120.0).content
         if data["status"] == "failed":
             err = data.get("error", {})
             raise RuntimeError(f"LTX job failed: {err.get('message', err)}")
-        # "pending" or "processing" — keep polling
 
     raise RuntimeError(f"LTX job {job_id} timed out after 10 minutes")
-
 
 
 # Runway video model IDs. Endpoint: /v1/image_to_video (or /v1/text_to_video,
