@@ -122,6 +122,43 @@ MAX_WORKERS: int = int(os.getenv("MAX_WORKERS", "4"))
 # Thread-safe print — prevents interleaved output from parallel workers.
 _PRINT_LOCK = threading.Lock()
 
+# Set to True the first time any worker detects a Runway daily task limit.
+# Once set, all subsequent workers check this flag and bail out immediately
+# rather than consuming more quota on attempts that will also fail.
+_daily_limit_hit = threading.Event()
+
+
+def _is_daily_limit(exc: Exception) -> bool:
+    """Return True if the exception is a Runway 429 daily task limit."""
+    msg = str(exc)
+    return "429" in msg and (
+        "daily" in msg.lower() or "task limit" in msg.lower()
+    )
+
+
+def _check_daily_limit() -> None:
+    """Raise RuntimeError if the daily task limit has been hit this run."""
+    if _daily_limit_hit.is_set():
+        raise RuntimeError(
+            "Runway daily task limit reached — skipping (re-run tomorrow "
+            "or top up credits; the experiment resumes from this point)."
+        )
+
+
+def _record_daily_limit(exc: Exception, context: str) -> None:
+    """Flag the daily limit and print a prominent one-time warning."""
+    if _daily_limit_hit.is_set():
+        return
+    _daily_limit_hit.set()
+    _tprint(
+        f"\n  {'='*60}\n"
+        f"  ⛔  RUNWAY DAILY TASK LIMIT REACHED at {context}\n"
+        f"  All remaining generation tasks will be skipped.\n"
+        f"  Re-run tomorrow (or top up credits at dev.runwayml.com).\n"
+        f"  The experiment resumes automatically from this point.\n"
+        f"  {'='*60}\n"
+    )
+
 
 def _tprint(*args, **kwargs) -> None:
     """Thread-safe print. Use inside parallel worker functions."""
@@ -507,12 +544,16 @@ def _generate_moodboard(prompt_text: str, slug: str) -> bytes:
 
     last_exc: Exception | None = None
     for model_label, fn in attempts:
+        _check_daily_limit()
         try:
             print(f"    [{model_label}] generating moodboard for {slug}...")
             result = fn()
             print(f"    ✓ {model_label} succeeded ({len(result)//1024}kB)")
             return result
         except Exception as e:  # noqa: BLE001
+            if _is_daily_limit(e):
+                _record_daily_limit(e, f"moodboard/{slug}")
+                raise
             print(f"    ✗ {model_label} failed: {e}")
             last_exc = e
 
@@ -836,9 +877,10 @@ def build_references(exp: Experiment, script: dict, cast: list[dict],
         ref_prompt = _reference_prompt(character, scene, lookbook)
 
         for label, fn in [
-            ("gpt_image", lambda: gpt_image(ref_prompt, size="1344x768", quality="standard")),
+            ("gpt_image",  lambda: gpt_image(ref_prompt, size="1344x768", quality="standard")),
             ("nano_banana", lambda: nano_banana(ref_prompt)),
         ]:
+            _check_daily_limit()
             try:
                 _tprint(f"    [{label}] reference for {cid}/{scene_id}")
                 img = fn()
@@ -853,7 +895,10 @@ def build_references(exp: Experiment, script: dict, cast: list[dict],
                 _tprint(f"    \u2713 {label} {cid}/{scene_id} ({len(img)//1024}kB)")
                 return scene_id, cid, str(out_path)
             except Exception as e:  # noqa: BLE001
-                _tprint(f"    \u2717 [{label}] {cid}/{scene_id}: {e}")
+                if _is_daily_limit(e):
+                    _record_daily_limit(e, f"reference/{cid}/{scene_id}")
+                    return None
+                _tprint(f"    ✗ [{label}] {cid}/{scene_id}: {e}")
 
         _tprint(f"  \u26a0 Reference failed for {cid}/{scene_id} — skipping")
         return None
@@ -1125,12 +1170,16 @@ def build_first_frames(exp: Experiment, script: dict, cast: list[dict],
             ("gpt_image*",  lambda: gpt_image(_rephrase_prompt(ff_prompt), size="1792x1024", quality="standard")),
             ("nano_banana", lambda: nano_banana(nano_prompt)),
         ]:
+            _check_daily_limit()
             try:
                 _tprint(f"    [{label}] frame {scene_id}/{shot_id}")
                 composition = fn()
                 composition_model = label
                 break
             except Exception as e:  # noqa: BLE001
+                if _is_daily_limit(e):
+                    _record_daily_limit(e, f"first_frame/{scene_id}/{shot_id}")
+                    return None
                 _tprint(f"    ✗ [{label}] {scene_id}/{shot_id}: {e}")
 
         if composition is None:
@@ -1171,8 +1220,12 @@ def build_first_frames(exp: Experiment, script: dict, cast: list[dict],
             else:
                 final = composition
         except Exception as e:  # noqa: BLE001
-            _tprint(f"    ⚠ Lock failed for {scene_id}/{shot_id}: {e}  (using composition)")
-            final = composition
+            if _is_daily_limit(e):
+                _record_daily_limit(e, f"first_frame_lock/{scene_id}/{shot_id}")
+                final = composition   # use composition without lock
+            else:
+                _tprint(f"    ⚠ Lock failed for {scene_id}/{shot_id}: {e}  (using composition)")
+                final = composition
 
         out_path.write_bytes(final)
         return scene_id, shot_id, str(out_path)
@@ -1333,12 +1386,10 @@ def build_video(exp: Experiment, script: dict, cast: list[dict],
             duration_seconds=route["segments"][0],
             estimated_cost=route["estimated_cost"],
         )
+        _check_daily_limit()
         try:
             video_bytes = _render_shot(
                 route, vp, ff.read_bytes(), ref_imgs,
-                # Seed is stable for the lifetime of this experiment so a
-                # re-run that needs to regenerate a missing take gets the
-                # same result as the original attempt would have.
                 seed=exp.seed + take_idx * 137,
             )
             take_path.write_bytes(video_bytes)
@@ -1346,6 +1397,9 @@ def build_video(exp: Experiment, script: dict, cast: list[dict],
                     f"({len(video_bytes)//1024}kB)")
             return scene_id, shot_id, str(take_path)
         except Exception as e:  # noqa: BLE001
+            if _is_daily_limit(e):
+                _record_daily_limit(e, f"video/{scene_id}/{shot_id}/take_{take_idx+1}")
+                return None
             _tprint(f"  Take {scene_id}/{shot_id}/{take_idx + 1} failed: {e}")
             return None
 
