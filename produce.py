@@ -740,7 +740,16 @@ def _generate_video(
                 runway_ok = False
                 attempts = [(l, f) for l, f in attempts
                             if l not in ("seedance", "veo")]
-            _tprint(f"    ✗ [{label}] {context}: {e}")
+            # Veo's safety filter sometimes returns the operation with a
+            # null response — surfaced as "no videos returned" or
+            # "'NoneType' object has no attribute ...". Squash those down
+            # to a one-liner; the cascade still handles the recovery.
+            msg = str(e)
+            if ("no videos returned" in msg
+                or "'NoneType' object has no attribute" in msg
+                or "safety-filter block" in msg):
+                msg = "veo safety filter or null response; cascading"
+            _tprint(f"    ✗ [{label}] {context}: {msg}")
             last_exc = e
 
     raise RuntimeError(
@@ -841,7 +850,12 @@ def _generate_image_t2i(
                 runway_ok = False
                 attempts = [(l, f) for l, f in attempts
                             if not l.startswith(("gpt_image", "nano_banana"))]
-            _tprint(f"    ✗ [{label}] {context}: {e}")
+            # Trim noisy moderation-block tracebacks down to a one-liner;
+            # cascade still proceeds normally.
+            msg = str(e)
+            if "moderation_blocked" in msg:
+                msg = "moderation_blocked (provider safety filter); cascading"
+            _tprint(f"    ✗ [{label}] {context}: {msg}")
             last_exc = e
 
     raise RuntimeError(
@@ -938,7 +952,10 @@ def _generate_image_with_refs(
                 runway_ok = False
                 attempts = [(l, f) for l, f in attempts
                             if not l.startswith(("gen4_image", "nano_banana"))]
-            _tprint(f"    ✗ [{label}] {context}: {e}")
+            msg = str(e)
+            if "moderation_blocked" in msg:
+                msg = "moderation_blocked (provider safety filter); cascading"
+            _tprint(f"    ✗ [{label}] {context}: {msg}")
             last_exc = e
 
     raise RuntimeError(

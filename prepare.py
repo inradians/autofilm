@@ -869,10 +869,34 @@ class Experiment:
         The experiment's seed is stored in ``seed.txt`` at creation and read
         back on every resume so video takes are reproducible across runs.
         """
+        force_new = os.environ.get("FORCE_NEW", "").lower() in ("1", "true", "yes")
+        book_pdf_set = bool(os.environ.get("BOOK_PDF_PATH", "").strip())
+
+        # ── Resolve which book this run targets ─────────────────────────
+        # When neither a slug nor BOOK_PDF_PATH is given (e.g. user re-runs
+        # `python run_loop.py ...` after a crash), resume the most recently
+        # modified incomplete experiment across ALL books. Without this,
+        # the slug derives to "unknown_book" and a fresh empty experiment
+        # gets created instead — wasting credits and losing the partial
+        # progress.
+        #
+        # We only do this when BOOK_PDF_PATH is unset, so a user pointing
+        # at a NEW book (BOOK_PDF_PATH=other.pdf) isn't hijacked into
+        # resuming an unrelated old experiment.
+        if book_slug is None and not force_new and not book_pdf_set:
+            incomplete = [
+                p for p in iter_all_experiments()
+                if not (p / "final.mp4").exists()
+            ]
+            if incomplete:
+                latest = max(incomplete, key=lambda p: p.stat().st_mtime)
+                book_slug = latest.parent.name
+                print(f"  Auto-resuming incomplete experiment "
+                      f"{book_slug}/{latest.name} "
+                      f"(set BOOK_PDF_PATH to start a fresh book run).")
+
         if book_slug is None:
             book_slug = _book_slug()
-
-        force_new = os.environ.get("FORCE_NEW", "").lower() in ("1", "true", "yes")
 
         if not force_new:
             book_dir = EXPERIMENTS_DIR / book_slug
