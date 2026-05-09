@@ -12,7 +12,7 @@
     --ink:       #e4e6ea;
     --muted:     #8a8f99;
     --border:    #2a2e38;
-    --accent:    #b85c47;   /* rust — same family as the bible PDF */
+    --accent:    #b85c47;
     --accent-d:  #8c4234;
     --good:      #5da877;
     --bad:       #c75450;
@@ -26,30 +26,41 @@
                   "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   }
   header {
-    padding: 16px 24px; border-bottom: 1px solid var(--border);
+    padding: 14px 24px; border-bottom: 1px solid var(--border);
     background: var(--panel);
     display: flex; align-items: center; justify-content: space-between;
   }
   header h1 {
-    margin: 0; font-size: 18px; font-weight: 600;
+    margin: 0; font-size: 17px; font-weight: 600;
     letter-spacing: 0.04em; text-transform: uppercase;
     color: var(--accent);
   }
-  header .meta { color: var(--muted); font-size: 12px; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  header .meta {
+    color: var(--muted); font-size: 12px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
 
-  main { display: grid; grid-template-columns: 380px 1fr; gap: 0; min-height: calc(100vh - 53px); }
+  main {
+    display: grid; grid-template-columns: 380px 1fr; gap: 0;
+    min-height: calc(100vh - 50px);
+  }
   aside {
     background: var(--panel); border-right: 1px solid var(--border);
-    padding: 20px; overflow-y: auto;
+    padding: 18px 20px; overflow-y: auto; max-height: calc(100vh - 50px);
   }
-  section.grid-area { padding: 20px 28px; overflow-y: auto; }
+  section.main-area {
+    padding: 20px 28px; overflow-y: auto;
+    max-height: calc(100vh - 50px);
+  }
 
-  h2 { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
-       color: var(--muted); margin: 0 0 10px; font-weight: 600; }
+  h2 {
+    font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); margin: 0 0 10px; font-weight: 600;
+  }
   h3 { margin: 0 0 8px; font-size: 14px; font-weight: 600; }
 
   /* Form */
-  .field { margin-bottom: 14px; }
+  .field { margin-bottom: 12px; }
   .field label {
     display: block; font-size: 11px; text-transform: uppercase;
     letter-spacing: 0.06em; color: var(--muted); margin-bottom: 4px;
@@ -77,9 +88,39 @@
   button.danger    { background: var(--bad); }
   button.danger:hover:not(:disabled) { background: #a8423e; }
 
+  /* Drag-drop zone */
+  .dropzone {
+    border: 2px dashed var(--border); border-radius: 6px;
+    background: var(--panel2);
+    padding: 14px; text-align: center; color: var(--muted);
+    font-size: 13px; cursor: pointer; transition: all 120ms;
+    position: relative;
+  }
+  .dropzone:hover { border-color: var(--muted); color: var(--ink); }
+  .dropzone.drag {
+    border-color: var(--accent); background: rgba(184, 92, 71, 0.08);
+    color: var(--ink);
+  }
+  .dropzone.has-file {
+    border-color: var(--good); border-style: solid;
+    color: var(--ink); background: rgba(93, 168, 119, 0.06);
+  }
+  .dropzone .filename {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 12px; word-break: break-all;
+  }
+  .dropzone .clear {
+    position: absolute; top: 6px; right: 8px;
+    background: none; border: 0; color: var(--muted);
+    font-size: 18px; cursor: pointer; padding: 0 4px;
+  }
+  .dropzone .clear:hover { color: var(--bad); }
+  .dropzone input[type="file"] { display: none; }
+
+  /* Status bar + progress */
   .status-bar {
     background: var(--panel2); border: 1px solid var(--border);
-    border-radius: 4px; padding: 10px 12px; margin: 12px 0;
+    border-radius: 4px; padding: 10px 12px; margin: 10px 0;
     font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px;
   }
   .status-bar .dot {
@@ -94,6 +135,37 @@
     50%     { opacity: 0.4; }
   }
 
+  /* Stage stepper */
+  .stepper { margin: 10px 0 0; }
+  .stepper-iter {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px;
+    color: var(--muted); margin-bottom: 6px;
+  }
+  .stepper-iter b { color: var(--ink); }
+  .stages {
+    display: flex; flex-wrap: wrap; gap: 4px;
+  }
+  .stage-pill {
+    background: var(--panel2); border: 1px solid var(--border);
+    border-radius: 3px; padding: 3px 8px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 10px; color: var(--muted);
+    transition: all 120ms;
+  }
+  .stage-pill.done {
+    background: rgba(93, 168, 119, 0.15);
+    border-color: var(--good); color: var(--good);
+  }
+  .stage-pill.current {
+    background: rgba(214, 168, 92, 0.15);
+    border-color: var(--warn); color: var(--warn);
+    animation: glow 1.6s infinite;
+  }
+  @keyframes glow {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(214, 168, 92, 0.4); }
+    50%      { box-shadow: 0 0 6px 1px rgba(214, 168, 92, 0.4); }
+  }
+
   pre.log {
     background: #0a0b0e; color: #c2c6cf;
     border: 1px solid var(--border); border-radius: 4px;
@@ -102,46 +174,46 @@
     line-height: 1.45; white-space: pre-wrap; margin: 6px 0 0;
   }
 
-  hr.div { border: 0; border-top: 1px solid var(--border); margin: 22px 0; }
+  hr.div { border: 0; border-top: 1px solid var(--border); margin: 18px 0; }
 
-  /* Experiment grid */
+  /* Main area: experiment focus */
   .empty {
     color: var(--muted); font-style: italic; padding: 60px 20px;
     text-align: center;
   }
-  .exp {
-    background: var(--panel); border: 1px solid var(--border);
-    border-radius: 6px; padding: 16px; margin-bottom: 16px;
-  }
   .exp-head {
     display: flex; align-items: baseline; justify-content: space-between;
-    margin-bottom: 12px;
+    margin-bottom: 14px; padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
   }
   .exp-head .id {
     font-family: ui-monospace, "SF Mono", Menlo, monospace;
-    font-weight: 600; font-size: 14px;
+    font-weight: 600; font-size: 16px;
   }
   .exp-head .loss {
-    font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 14px;
   }
   .exp-head .loss .v { color: var(--accent); font-weight: 600; }
 
-  .scores { display: flex; gap: 12px; font-size: 11px; color: var(--muted);
-            margin-bottom: 14px; font-family: ui-monospace, monospace; }
+  .scores {
+    display: flex; flex-wrap: wrap; gap: 14px;
+    font-size: 11px; color: var(--muted);
+    margin-bottom: 18px; font-family: ui-monospace, monospace;
+  }
   .scores span b { color: var(--ink); }
 
-  .stage { margin-top: 14px; }
-  .stage h4 {
-    margin: 0 0 8px; font-size: 11px; font-weight: 600;
+  .stage-section { margin-top: 22px; }
+  .stage-section h4 {
+    margin: 0 0 10px; font-size: 11px; font-weight: 600;
     text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);
   }
 
   .thumbs {
-    display: grid; gap: 6px;
-    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    display: grid; gap: 8px;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   }
   .thumbs.video {
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   }
   .thumb {
     background: #000; border: 1px solid var(--border); border-radius: 3px;
@@ -157,20 +229,20 @@
     font-family: ui-monospace, "SF Mono", Menlo, monospace;
     pointer-events: none;
   }
-
-  .final-mp4 { aspect-ratio: 16 / 9; max-width: 640px; }
+  .final-mp4 { aspect-ratio: 16 / 9; max-width: 720px; }
 
   .pill {
     display: inline-block; padding: 1px 6px; border-radius: 10px;
     font-size: 10px; font-family: ui-monospace, monospace;
-    margin-left: 6px; background: var(--panel2); border: 1px solid var(--border);
-    color: var(--muted);
+    margin-left: 8px; background: var(--panel2);
+    border: 1px solid var(--border); color: var(--muted);
   }
   .pill.parent  { color: var(--warn); border-color: var(--warn); }
+  .pill.live    { color: var(--good); border-color: var(--good);
+                  animation: pulse 1.4s infinite; }
 
-  /* Plan summary */
   .plan {
-    font-size: 11px; color: var(--muted); margin-top: 6px;
+    font-size: 11px; color: var(--muted); margin-top: 4px;
     font-family: ui-monospace, monospace;
   }
 
@@ -189,17 +261,35 @@
 <main>
   <!-- ── Sidebar ───────────────────────────────────────────── -->
   <aside>
+    <h2>experiments</h2>
+    <div class="field">
+      <select id="expDropdown">
+        <option value="">— newest experiment —</option>
+      </select>
+    </div>
+
+    <hr class="div" />
+
     <h2>configure run</h2>
 
     <form id="runForm" enctype="multipart/form-data">
       <div class="field">
-        <label for="book_path">book pdf path</label>
-        <input id="book_path" name="book_path" type="text"
-               placeholder="/path/to/book.pdf" required />
+        <label>book pdf</label>
+        <div class="dropzone" id="bookDropzone">
+          <span class="placeholder">drag &amp; drop a .pdf here, or click to browse</span>
+          <input id="bookFile" name="book_file" type="file" accept=".pdf,application/pdf" />
+          <button type="button" class="clear" id="bookClear" style="display:none">×</button>
+        </div>
       </div>
 
       <div class="field">
-        <label for="moodboards">moodboard examples (images)</label>
+        <label for="bookPath">…or server-local path</label>
+        <input id="bookPath" name="book_path" type="text"
+               placeholder="/path/to/book.pdf" />
+      </div>
+
+      <div class="field">
+        <label for="moodboards">moodboard examples (optional)</label>
         <input id="moodboards" name="moodboards" type="file"
                accept="image/png,image/jpeg,image/webp" multiple />
       </div>
@@ -233,8 +323,8 @@
       </div>
 
       <div class="field">
-        <label for="target_loss">target film_loss</label>
-        <input id="target_loss" name="target_loss" type="number"
+        <label for="targetLoss">target film_loss</label>
+        <input id="targetLoss" name="target_loss" type="number"
                value="0.15" min="0" max="1" step="0.01" />
       </div>
 
@@ -245,6 +335,13 @@
     <div class="status-bar" id="runStatus">
       <span class="dot"></span><span id="runStatusText">idle</span>
     </div>
+
+    <!-- Progress stepper -->
+    <div class="stepper" id="stepper" style="display:none">
+      <div class="stepper-iter" id="stepperIter"></div>
+      <div class="stages" id="stages"></div>
+    </div>
+
     <details>
       <summary>log tail</summary>
       <pre class="log" id="runLog"></pre>
@@ -278,15 +375,17 @@
     </details>
   </aside>
 
-  <!-- ── Main grid ─────────────────────────────────────────── -->
-  <section class="grid-area">
-    <h2>experiments</h2>
-    <div id="experiments"><div class="empty">No experiments yet — start a run to populate this grid.</div></div>
+  <!-- ── Main area ─────────────────────────────────────────── -->
+  <section class="main-area" id="mainArea">
+    <div class="empty">No experiments yet — start a run to populate this view.</div>
   </section>
 </main>
 
 <script>
 const $ = (id) => document.getElementById(id);
+let pipelineStages = [];   // populated from /api/state
+let selectedExpKey = "";   // empty = follow latest
+let lastExperimentList = [];
 
 // ── Render helpers ──────────────────────────────────────────
 
@@ -294,13 +393,19 @@ function artifactURL(book_slug, exp_id, relpath) {
   return `/api/artifact/${encodeURIComponent(book_slug)}/${encodeURIComponent(exp_id)}/${relpath}`;
 }
 
-function thumbImg(book_slug, exp_id, relpath, caption) {
+function makeThumb(book_slug, exp_id, relpath, caption, isVideo = false) {
   const wrap = document.createElement('div');
   wrap.className = 'thumb';
-  const img = document.createElement('img');
-  img.loading = 'lazy';
-  img.src = artifactURL(book_slug, exp_id, relpath);
-  wrap.appendChild(img);
+  let media;
+  if (isVideo) {
+    media = document.createElement('video');
+    media.muted = true; media.controls = true; media.preload = 'metadata';
+  } else {
+    media = document.createElement('img');
+    media.loading = 'lazy';
+  }
+  media.src = artifactURL(book_slug, exp_id, relpath);
+  wrap.appendChild(media);
   if (caption) {
     const cap = document.createElement('div');
     cap.className = 'cap';
@@ -310,34 +415,19 @@ function thumbImg(book_slug, exp_id, relpath, caption) {
   return wrap;
 }
 
-function thumbVideo(book_slug, exp_id, relpath, caption) {
-  const wrap = document.createElement('div');
-  wrap.className = 'thumb';
-  const v = document.createElement('video');
-  v.src = artifactURL(book_slug, exp_id, relpath);
-  v.muted = true; v.controls = true; v.preload = 'metadata';
-  wrap.appendChild(v);
-  if (caption) {
-    const cap = document.createElement('div');
-    cap.className = 'cap';
-    cap.textContent = caption;
-    wrap.appendChild(cap);
-  }
-  return wrap;
-}
-
-function makeStage(title) {
-  const stage = document.createElement('div');
-  stage.className = 'stage';
+function makeStageSection(title) {
+  const s = document.createElement('div');
+  s.className = 'stage-section';
   const h4 = document.createElement('h4');
   h4.textContent = title;
-  stage.appendChild(h4);
-  return stage;
+  s.appendChild(h4);
+  return s;
 }
 
-function renderExperiment(exp) {
-  const card = document.createElement('div');
-  card.className = 'exp';
+function renderExperimentDetail(data, isLive = false) {
+  const target = $('mainArea');
+  target.innerHTML = '';
+  const container = document.createElement('div');
 
   const head = document.createElement('div');
   head.className = 'exp-head';
@@ -345,15 +435,20 @@ function renderExperiment(exp) {
   const left = document.createElement('div');
   const idEl = document.createElement('span');
   idEl.className = 'id';
-  idEl.textContent = exp.qualified;
+  idEl.textContent = data.qualified;
   left.appendChild(idEl);
-  if (exp.bible && exp.bible.parent_exp) {
+  if (data.bible && data.bible.parent_exp) {
     const pill = document.createElement('span');
     pill.className = 'pill parent';
-    pill.textContent = `← ${exp.bible.parent_exp}`;
+    pill.textContent = `← ${data.bible.parent_exp}`;
     left.appendChild(pill);
   }
-  if (!exp.has_final) {
+  if (isLive) {
+    const pill = document.createElement('span');
+    pill.className = 'pill live';
+    pill.textContent = 'live';
+    left.appendChild(pill);
+  } else if (!data.has_final) {
     const pill = document.createElement('span');
     pill.className = 'pill';
     pill.textContent = 'in progress';
@@ -361,29 +456,28 @@ function renderExperiment(exp) {
   }
   head.appendChild(left);
 
-  if (exp.bible && exp.bible.metric) {
-    const m  = exp.bible.metric;
-    const r  = document.createElement('div');
+  if (data.bible && data.bible.metric) {
+    const m = data.bible.metric;
+    const r = document.createElement('div');
     r.className = 'loss';
     r.innerHTML = `film_loss = <span class="v">${m.film_loss?.toFixed(4)}</span>`;
     head.appendChild(r);
   }
-  card.appendChild(head);
+  container.appendChild(head);
 
   // Per-axis scores
-  if (exp.bible && exp.bible.metric && exp.bible.metric.scores) {
-    const s = exp.bible.metric.scores;
+  if (data.bible && data.bible.metric && data.bible.metric.scores) {
     const sc = document.createElement('div');
     sc.className = 'scores';
-    for (const [k, v] of Object.entries(s)) {
+    for (const [k, v] of Object.entries(data.bible.metric.scores)) {
       sc.innerHTML += `<span>${k} <b>${v.toFixed(3)}</b></span>`;
     }
-    card.appendChild(sc);
+    container.appendChild(sc);
   }
 
-  // Carryover plan summary (what was changed in this iter vs parent)
-  if (exp.bible && exp.bible.carryover_from_parent) {
-    const co = exp.bible.carryover_from_parent;
+  // Carryover plan summary
+  if (data.bible && data.bible.carryover_from_parent) {
+    const co = data.bible.carryover_from_parent;
     const flags = [];
     for (const [k, v] of Object.entries(co)) {
       if (k.startsWith('regen_') && v !== false && v !== null
@@ -396,131 +490,158 @@ function renderExperiment(exp) {
     if (flags.length) {
       const p = document.createElement('div');
       p.className = 'plan';
-      p.textContent = `regen: ${flags.join(', ')}`;
-      card.appendChild(p);
+      p.textContent = `regen vs parent: ${flags.join(', ')}`;
+      container.appendChild(p);
     }
   }
 
-  if (!exp.bible || !exp.bible.stages) {
+  if (!data.bible || !data.bible.stages) {
     const note = document.createElement('div');
     note.style.color = 'var(--muted)';
     note.style.fontStyle = 'italic';
-    note.style.padding = '12px 0';
+    note.style.padding = '20px 0';
     note.textContent = 'production_bible.json not yet written.';
-    card.appendChild(note);
-    return card;
+    container.appendChild(note);
+    target.appendChild(container);
+    return;
   }
 
-  const stages = exp.bible.stages;
-  const slug   = exp.book_slug;
-  const eid    = exp.exp_id;
+  const st = data.bible.stages;
+  const slug = data.book_slug;
+  const eid  = data.exp_id;
 
   // Lookbook style frame
-  if (stages.lookbook && stages.lookbook.style_frame) {
-    const s = makeStage('lookbook style frame');
+  if (st.lookbook && st.lookbook.style_frame) {
+    const s = makeStageSection('lookbook style frame');
     const grid = document.createElement('div');
     grid.className = 'thumbs';
-    grid.appendChild(thumbImg(slug, eid, stages.lookbook.style_frame, 'style_frame'));
+    grid.appendChild(makeThumb(slug, eid, st.lookbook.style_frame, 'style_frame'));
     s.appendChild(grid);
-    card.appendChild(s);
+    container.appendChild(s);
   }
 
-  // Character references
-  if (stages.references && stages.references.by_scene_char) {
-    const refs = stages.references.by_scene_char;
-    const keys = Object.keys(refs).slice(0, 12);
+  // Character refs
+  if (st.references && st.references.by_scene_char) {
+    const refs = st.references.by_scene_char;
+    const keys = Object.keys(refs);
     if (keys.length) {
-      const s = makeStage(`character references (${Object.keys(refs).length})`);
+      const s = makeStageSection(`character references (${keys.length})`);
       const grid = document.createElement('div');
       grid.className = 'thumbs';
-      for (const k of keys) {
-        grid.appendChild(thumbImg(slug, eid, refs[k], k));
-      }
+      for (const k of keys.slice(0, 24))
+        grid.appendChild(makeThumb(slug, eid, refs[k], k));
       s.appendChild(grid);
-      card.appendChild(s);
+      container.appendChild(s);
     }
   }
 
   // Location moodboards
-  if (stages.locations && stages.locations.moodboards) {
-    const mbs = stages.locations.moodboards;
+  if (st.locations && st.locations.moodboards) {
+    const mbs = st.locations.moodboards;
     const keys = Object.keys(mbs);
     if (keys.length) {
-      const s = makeStage(`location moodboards (${keys.length})`);
+      const s = makeStageSection(`location moodboards (${keys.length})`);
       const grid = document.createElement('div');
       grid.className = 'thumbs';
-      for (const k of keys) {
-        grid.appendChild(thumbImg(slug, eid, mbs[k], k));
-      }
+      for (const k of keys)
+        grid.appendChild(makeThumb(slug, eid, mbs[k], k));
       s.appendChild(grid);
-      card.appendChild(s);
+      container.appendChild(s);
     }
   }
 
-  // First frames per shot
-  if (stages.frames && stages.frames.by_scene_shot) {
-    const frames = stages.frames.by_scene_shot;
-    const keys = Object.keys(frames).slice(0, 24);
+  // First frames
+  if (st.frames && st.frames.by_scene_shot) {
+    const fr = st.frames.by_scene_shot;
+    const keys = Object.keys(fr);
     if (keys.length) {
-      const s = makeStage(`first frames (${Object.keys(frames).length})`);
+      const s = makeStageSection(`first frames (${keys.length})`);
       const grid = document.createElement('div');
       grid.className = 'thumbs';
-      for (const k of keys) {
-        grid.appendChild(thumbImg(slug, eid, frames[k], k));
-      }
+      for (const k of keys.slice(0, 48))
+        grid.appendChild(makeThumb(slug, eid, fr[k], k));
       s.appendChild(grid);
-      card.appendChild(s);
+      container.appendChild(s);
     }
   }
 
-  // Clips / takes
-  if (stages.clips && stages.clips.by_scene_shot_take) {
-    const clips = stages.clips.by_scene_shot_take;
-    const keys = Object.keys(clips).slice(0, 12);
+  // Takes
+  if (st.clips && st.clips.by_scene_shot_take) {
+    const cl = st.clips.by_scene_shot_take;
+    const keys = Object.keys(cl);
     if (keys.length) {
-      const s = makeStage(`takes (${Object.keys(clips).length})`);
+      const s = makeStageSection(`takes (${keys.length})`);
       const grid = document.createElement('div');
       grid.className = 'thumbs video';
-      for (const k of keys) {
-        grid.appendChild(thumbVideo(slug, eid, clips[k], k));
-      }
+      for (const k of keys.slice(0, 24))
+        grid.appendChild(makeThumb(slug, eid, cl[k], k, true));
       s.appendChild(grid);
-      card.appendChild(s);
+      container.appendChild(s);
     }
   }
 
-  // Final film
-  if (stages.final && stages.final.path) {
-    const s = makeStage('final.mp4');
+  // Final
+  if (st.final && st.final.path) {
+    const s = makeStageSection('final.mp4');
     const wrap = document.createElement('div');
     wrap.className = 'thumb final-mp4';
     const v = document.createElement('video');
-    v.src = artifactURL(slug, eid, stages.final.path);
+    v.src = artifactURL(slug, eid, st.final.path);
     v.controls = true; v.preload = 'metadata';
     wrap.appendChild(v);
     s.appendChild(wrap);
-    card.appendChild(s);
+    container.appendChild(s);
   }
 
-  return card;
+  target.appendChild(container);
 }
 
-// ── Status bar ──────────────────────────────────────────────
+// ── Status bars + progress ──────────────────────────────────
 
-function setStatus(elPrefix, snap) {
-  const dot  = document.querySelector(`#${elPrefix}Status .dot`);
-  const text = $(`${elPrefix}StatusText`);
+function setStatus(prefix, snap) {
+  const dot  = document.querySelector(`#${prefix}Status .dot`);
+  const text = $(`${prefix}StatusText`);
   dot.className = 'dot ' + snap.status;
   let txt = snap.status;
   if (snap.is_running && snap.config && Object.keys(snap.config).length) {
     const c = snap.config;
     if (c.iterations) txt += ` · ${c.iterations} iter`;
-    if (c.category) txt += ` · ${c.category}`;
+    if (c.category)   txt += ` · ${c.category}`;
   }
   if (snap.exit_code !== null && snap.exit_code !== undefined && !snap.is_running) {
     txt += ` · exit ${snap.exit_code}`;
   }
   text.textContent = txt;
+}
+
+function renderStepper(progress) {
+  const stepper = $('stepper');
+  if (!progress || !progress.current_iteration) {
+    stepper.style.display = 'none';
+    return;
+  }
+  stepper.style.display = '';
+  const iterEl = $('stepperIter');
+  iterEl.innerHTML =
+    `iter <b>${progress.current_iteration}</b>/${progress.total_iterations || '?'}`
+    + (progress.current_exp ? ` · <b>${progress.current_exp}</b>` : '')
+    + (progress.last_film_loss != null
+       ? ` · last loss <b>${progress.last_film_loss.toFixed(4)}</b>` : '');
+
+  const stages = $('stages');
+  stages.innerHTML = '';
+  const completed = new Set(progress.completed_stages || []);
+  for (const s of pipelineStages) {
+    const pill = document.createElement('div');
+    pill.className = 'stage-pill';
+    if (completed.has(s.id))         pill.classList.add('done');
+    if (progress.current_stage === s.id) pill.classList.add('current');
+    pill.textContent = s.id === '1.5' || s.id === '6.5'
+      ? `${s.id}`
+      : (s.id === 'eval' || s.id === 'bible' ? s.label : `${s.id}`);
+    pill.title = `${s.id}: ${s.label}`;
+    stages.appendChild(pill);
+  }
 }
 
 function renderLogTail(elId, lines) {
@@ -529,58 +650,195 @@ function renderLogTail(elId, lines) {
   el.scrollTop = el.scrollHeight;
 }
 
+// ── Experiment dropdown ─────────────────────────────────────
+
+function rebuildDropdown(experiments) {
+  const dd = $('expDropdown');
+  const prev = dd.value;
+  dd.innerHTML = '';
+  const def = document.createElement('option');
+  def.value = '';
+  def.textContent = '— newest experiment —';
+  dd.appendChild(def);
+  for (const exp of experiments) {
+    const opt = document.createElement('option');
+    opt.value = exp.qualified;
+    let label = exp.qualified;
+    if (!exp.has_final)       label += '  · in progress';
+    else if (!exp.has_metric) label += '  · unscored';
+    opt.textContent = label;
+    dd.appendChild(opt);
+  }
+  if (prev && experiments.some(e => e.qualified === prev)) dd.value = prev;
+}
+
+async function loadExperimentDetail(qualified) {
+  if (!qualified) return null;
+  const [book, exp] = qualified.split('/');
+  try {
+    const r = await fetch(`/api/experiment/${encodeURIComponent(book)}/${encodeURIComponent(exp)}`);
+    if (!r.ok) return null;
+    return await r.json();
+  } catch { return null; }
+}
+
+function applyDefaultsFromConfig(rc) {
+  if (!rc) return;
+  if (rc.book_path)        $('bookPath').value        = rc.book_path;
+  if (rc.director)         $('director').value        = rc.director;
+  if (rc.cinematographer)  $('cinematographer').value = rc.cinematographer;
+  if (rc.iterations)       $('iterations').value      = rc.iterations;
+  if (rc.target_loss)      $('targetLoss').value      = rc.target_loss;
+  if (rc.threshold)        $('threshold').value       = rc.threshold;
+}
+
+// ── Drag-drop PDF zone ──────────────────────────────────────
+
+function setupDropzone() {
+  const dz = $('bookDropzone');
+  const input = $('bookFile');
+  const clearBtn = $('bookClear');
+
+  function showFile(file) {
+    dz.classList.add('has-file');
+    dz.querySelector('.placeholder').innerHTML =
+      `<span class="filename">${file.name}</span> · ${(file.size/1048576).toFixed(2)} MB`;
+    clearBtn.style.display = '';
+    // Selecting a local file overrides any path.
+    $('bookPath').value = '';
+  }
+
+  function clearFile() {
+    input.value = '';
+    dz.classList.remove('has-file');
+    dz.querySelector('.placeholder').textContent =
+      'drag & drop a .pdf here, or click to browse';
+    clearBtn.style.display = 'none';
+  }
+
+  dz.addEventListener('click', (e) => {
+    if (e.target === clearBtn) return;
+    input.click();
+  });
+  input.addEventListener('change', () => {
+    if (input.files && input.files[0]) showFile(input.files[0]);
+  });
+  clearBtn.addEventListener('click', (e) => {
+    e.stopPropagation(); clearFile();
+  });
+
+  // Drag events
+  ['dragenter', 'dragover'].forEach(ev =>
+    dz.addEventListener(ev, e => {
+      e.preventDefault(); e.stopPropagation(); dz.classList.add('drag');
+    })
+  );
+  ['dragleave', 'dragend'].forEach(ev =>
+    dz.addEventListener(ev, e => {
+      e.preventDefault(); e.stopPropagation(); dz.classList.remove('drag');
+    })
+  );
+  dz.addEventListener('drop', e => {
+    e.preventDefault(); e.stopPropagation(); dz.classList.remove('drag');
+    const f = e.dataTransfer?.files?.[0];
+    if (!f) return;
+    if (!f.name.toLowerCase().endsWith('.pdf')) {
+      alert('Only .pdf files are accepted.');
+      return;
+    }
+    // Populate the hidden file input (DataTransfer trick)
+    const dt = new DataTransfer();
+    dt.items.add(f);
+    input.files = dt.files;
+    showFile(f);
+  });
+}
+
 // ── Polling loop ─────────────────────────────────────────────
 
-let pollTimer = null;
 async function poll() {
   try {
-    const resp = await fetch('/api/state');
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = await resp.json();
+    const r = await fetch('/api/state');
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
 
+    pipelineStages = data.stages || [];
     setStatus('run',   data.run);
     setStatus('smoke', data.smoke);
     renderLogTail('runLog',   data.run.log_tail);
     renderLogTail('smokeLog', data.smoke.log_tail);
+    renderStepper(data.run.progress);
 
-    // Toggle start/stop visibility
     $('startBtn').style.display = data.run.is_running ? 'none' : '';
     $('stopBtn').style.display  = data.run.is_running ? '' : 'none';
 
-    // Render experiment grid
-    const target = $('experiments');
-    if (!data.experiments || data.experiments.length === 0) {
-      target.innerHTML = '<div class="empty">No experiments yet — start a run to populate this grid.</div>';
-    } else {
-      target.innerHTML = '';
-      for (const exp of data.experiments) {
-        target.appendChild(renderExperiment(exp));
+    // Update dropdown if experiment list changed.
+    const newKeys = data.experiments.map(e => e.qualified).join('|');
+    const oldKeys = lastExperimentList.map(e => e.qualified).join('|');
+    if (newKeys !== oldKeys) {
+      lastExperimentList = data.experiments;
+      rebuildDropdown(data.experiments);
+    }
+
+    // Decide what to show in the main area:
+    // - if user has chosen one, show that
+    // - else if a run is in progress, show the live current_exp
+    // - else show the most recent experiment
+    let showKey = selectedExpKey;
+    let isLive = false;
+    if (!showKey) {
+      if (data.run.is_running && data.run.progress?.current_exp) {
+        showKey = data.run.progress.current_exp;
+        isLive = true;
+      } else if (data.experiments.length) {
+        showKey = data.experiments[0].qualified;
       }
     }
 
-    $('meta').textContent = `connected · ${data.experiments?.length || 0} experiment(s)`;
+    if (showKey) {
+      const detail = await loadExperimentDetail(showKey);
+      if (detail) renderExperimentDetail(detail, isLive);
+    } else {
+      $('mainArea').innerHTML = '<div class="empty">No experiments yet — start a run to populate this view.</div>';
+    }
+
+    $('meta').textContent =
+      `connected · ${data.experiments.length} experiment(s)`
+      + (data.run.is_running ? ' · running' : '');
   } catch (e) {
     $('meta').textContent = `disconnected (${e.message})`;
   }
 }
 
-function startPolling() {
-  poll();
-  if (pollTimer) clearInterval(pollTimer);
-  pollTimer = setInterval(poll, 3000);
-}
+// ── Form / event handlers ────────────────────────────────────
 
-// ── Form handlers ────────────────────────────────────────────
+$('expDropdown').addEventListener('change', async (e) => {
+  selectedExpKey = e.target.value;
+  if (selectedExpKey) {
+    const detail = await loadExperimentDetail(selectedExpKey);
+    if (detail) {
+      renderExperimentDetail(detail, false);
+      applyDefaultsFromConfig(detail.run_config);
+    }
+  } else {
+    poll();   // re-trigger to show live or newest
+  }
+});
 
 $('runForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const fd = new FormData(e.target);
+  // If the file dropzone has a file, it'll already be in fd as book_file.
   $('startBtn').disabled = true;
   try {
     const r = await fetch('/api/start', { method: 'POST', body: fd });
     const j = await r.json();
     if (!r.ok) {
       alert('Start failed: ' + (j.error || r.statusText));
+    } else {
+      // Switch to live view of the new run.
+      selectedExpKey = '';
+      $('expDropdown').value = '';
     }
   } catch (e) {
     alert('Start failed: ' + e.message);
@@ -612,7 +870,9 @@ $('smokeBtn').addEventListener('click', async () => {
   }
 });
 
-startPolling();
+setupDropzone();
+poll();
+setInterval(poll, 3000);
 </script>
 
 </body>

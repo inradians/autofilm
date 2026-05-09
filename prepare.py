@@ -820,6 +820,20 @@ class Experiment:
         seed = int(os.environ.get("SEED", "")) if os.environ.get("SEED", "").isdigit() \
                else _random.randint(100_000, 999_999)
         (root / "seed.txt").write_text(str(seed))
+        # If the UI server staged a "pending" run config (set via the
+        # AUTOFILM_PENDING_RUN_CONFIG env var), copy it into this exp dir
+        # so the UI dropdown can later load these settings as defaults
+        # when re-running. The pending file is per-book, so this works
+        # for both fresh runs and resumes; for new_iteration() the parent
+        # exp will already have its own run_config.json.
+        pending_str = os.environ.get("AUTOFILM_PENDING_RUN_CONFIG", "")
+        if pending_str:
+            pending = Path(pending_str)
+            if pending.is_file():
+                try:
+                    (root / "run_config.json").write_text(pending.read_text())
+                except Exception:
+                    pass   # non-fatal
         return cls(exp_id=exp_id, root=root)
 
     @classmethod
@@ -996,11 +1010,20 @@ class Experiment:
         (root / "carryover.json").write_text(
             json.dumps(carryover, indent=2, ensure_ascii=False)
         )
+        # Inherit the parent's run_config.json so the UI dropdown shows
+        # consistent defaults across the whole iteration chain.
+        prev_rc = prev_exp.root / "run_config.json"
+        if prev_rc.exists():
+            try:
+                (root / "run_config.json").write_text(prev_rc.read_text())
+            except Exception:
+                pass
 
         # Top-level files we never copy forward (rebuilt by next exp).
         skip_files: set[str] = {
             "produce.py", "book.txt", "seed.txt", "parent_exp.txt",
-            "carryover.json", "final.mp4", "final_pregrade.mp4",
+            "carryover.json", "run_config.json",
+            "final.mp4", "final_pregrade.mp4",
             "metric.json", "critique.md", "bible.pdf",
             "production_bible.json", "prompts.json",
         }
