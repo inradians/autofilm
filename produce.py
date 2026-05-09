@@ -1336,27 +1336,56 @@ def build_first_frames(exp: Experiment, script: dict, cast: list[dict],
         if out_path.exists():
             return scene_id, shot_id, str(out_path)
 
+        # first_frame_prompt already includes actor names
+        # ("played by Jeff Goldblum") — FLUX handles these reliably.
         ff_prompt = first_frame_prompt(
             lookbook, shot, scene, chars, actors, loc_by_scene.get(scene_id)
         )
+
+        # ── Step 1: Compose the frame ─────────────────────────────────
+        # FLUX leads because the prompt contains celebrity names. Fallback
+        # to Runway models strips the name context but they're still useful
+        # with the identity-lock step that follows.
+        composition: bytes | None = None
+        composition_model = FLUX_PRO_MODEL
+        for label, fn in [
+            ("flux-pro",  lambda: flux_image(ff_prompt)),
+            ("flux-pro*", lambda: flux_image(_rephrase_prompt(ff_prompt))),
+            ("flux-dev",  lambda: flux_image(ff_prompt, model=FLUX_DEV_MODEL)),
+            ("nano_banana", lambda: nano_banana(ff_prompt)),
+        ]:
+            try:
+                _tprint(f"    [{label}] frame {scene_id}/{shot_id}")
+                composition = fn()
+                composition_model = label
+                break
+            except Exception as e:  # noqa: BLE001
+                _tprint(f"    ✗ [{label}] {scene_id}/{shot_id}: {e}")
+
+        if composition is None:
+            _tprint(f"  ⚠ All composition attempts failed for {scene_id}/{shot_id}")
+            return None
+
+        exp.log_prompt(
+            target=f"frames/{scene_id}/{shot_id}.composition.png",
+            model=composition_model,
+            prompt=ff_prompt,
+            stage="first_frame_composition",
+            scene=scene_id, shot=shot_id,
+        )
+
+        # ── Step 2: Lock identity with character reference images ──────
+        ref_imgs = []
+        for c in chars:
+            rp = exp.path(f"references/{c['id']}/{scene_id}.png")
+            if rp.exists():
+                ref_imgs.append(rp.read_bytes())
+
         try:
-            composition = gpt_image(ff_prompt, size="1792x1024", quality="high")
-            exp.log_prompt(
-                target=f"frames/{scene_id}/{shot_id}.composition.png",
-                model=GPT_IMAGE_MODEL,
-                prompt=ff_prompt,
-                stage="first_frame_composition",
-                scene=scene_id, shot=shot_id,
-            )
-            ref_imgs = []
-            for c in chars:
-                rp = exp.path(f"references/{c['id']}/{scene_id}.png")
-                if rp.exists():
-                    ref_imgs.append(rp.read_bytes())
             if ref_imgs:
                 lock_prompt = (
-                    ff_prompt + "\n\nUse FIRST image as composition, then character "
-                    "identity refs. Preserve faces exactly."
+                    ff_prompt + "\n\nUse FIRST image as composition framing, "
+                    "then character identity refs. Preserve faces exactly."
                 )
                 final = nano_banana(lock_prompt, reference_images=[composition] + ref_imgs)
                 exp.log_prompt(
@@ -1369,11 +1398,12 @@ def build_first_frames(exp: Experiment, script: dict, cast: list[dict],
                 )
             else:
                 final = composition
-            out_path.write_bytes(final)
-            return scene_id, shot_id, str(out_path)
         except Exception as e:  # noqa: BLE001
-            _tprint(f"  First frame {scene_id}/{shot_id} failed: {e}")
-            return None
+            _tprint(f"    ⚠ Lock failed for {scene_id}/{shot_id}: {e}  (using composition)")
+            final = composition
+
+        out_path.write_bytes(final)
+        return scene_id, shot_id, str(out_path)
 
     _tprint(f"  Generating {len(work_items)} first frame(s) "
             f"({'parallel' if MAX_WORKERS > 1 else 'serial'}, "
