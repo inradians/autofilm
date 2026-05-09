@@ -984,6 +984,27 @@ def claude_tool(system: str, user_content: Any, tool_name: str, tool_schema: dic
     raise RuntimeError(f"Claude tool '{tool_name}' returned no tool_use block")
 
 
+def claude_text(user: str, system: str = "", model: str = "claude-haiku-4-5-20251001",
+                max_tokens: int = 1024) -> str:
+    """Simple single-turn Claude call that returns the text response.
+
+    Use for cheap rewriting, classification, or short generation tasks
+    where a tool call is unnecessary overhead. Defaults to Haiku for cost.
+    """
+    messages: list[dict] = [{"role": "user", "content": user}]
+    kwargs: dict[str, Any] = {
+        "model": model,
+        "max_tokens": max_tokens,
+        "messages": messages,
+    }
+    if system:
+        kwargs["system"] = system
+    resp = claude().messages.create(**kwargs)
+    return "".join(
+        block.text for block in resp.content if hasattr(block, "text")
+    ).strip()
+
+
 @api_retry
 def stable_audio(prompt: str, duration_seconds: int = 30) -> bytes:
     """Stability Stable Audio 2.5 — instrumental cinematic cues.

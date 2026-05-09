@@ -47,6 +47,7 @@ from prepare import (
     VEO_TIER,
     VIDEO_MODELS,
     book_chunks,
+    claude_text,
     claude_tool,
     elevenlabs_sfx,
     extract_video_frame,
@@ -55,7 +56,6 @@ from prepare import (
     gpt_image,
     nano_banana,
     plan_shot_durations,
-    prompt,
     route_shot,
     runway_image,
     stable_audio,
@@ -460,15 +460,17 @@ def _rephrase_prompt(original: str) -> str:
     """Ask Claude to reword an image prompt using neutral/architectural
     language without changing the scene content. Used when a prompt is
     rejected by an image model's content filter."""
-    return prompt(
-        f"Rewrite this image-generation prompt so it passes content-policy "
-        f"filters. Do NOT change the subject, location, objects, or visual "
-        f"content — only reword using neutral, architectural, or clinical "
-        f"language. Avoid anything that sounds graphic, medical-emergency, "
-        f"or disturbing. Return ONLY the rewritten prompt. No explanation.\n\n"
-        f"Original prompt:\n{original}",
-        model="claude-haiku-4-5-20251001",  # cheap — this is just a reword
-    ).strip()
+    return claude_text(
+        user=(
+            "Rewrite this image-generation prompt so it passes content-policy "
+            "filters. Do NOT change the subject, location, objects, or visual "
+            "content — only reword using neutral, architectural, or clinical "
+            "language. Avoid anything that sounds graphic, medical-emergency, "
+            "or disturbing. Return ONLY the rewritten prompt. No explanation.\n\n"
+            f"Original prompt:\n{original}"
+        ),
+        model="claude-haiku-4-5-20251001",
+    )
 
 
 def _veo_first_frame(image_prompt: str) -> bytes:
