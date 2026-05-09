@@ -1439,9 +1439,15 @@ CRITIC_TOOL_SCHEMA = {
                 "items": {
                     "type": "object",
                     "properties": {
-                        "axis": {"enum": ["cinematography", "color", "sound", "acting",
-                                          "continuity", "fidelity"]},
-                        "priority": {"enum": ["low", "medium", "high"]},
+                        "axis": {
+                            "type": "string",
+                            "enum": ["cinematography", "color", "sound", "acting",
+                                     "continuity", "fidelity"],
+                        },
+                        "priority": {
+                            "type": "string",
+                            "enum": ["low", "medium", "high"],
+                        },
                         "target": {
                             "type": "string",
                             "description": "Function or parameter in produce.py to modify, e.g. 'shot_list_for_scene', 'LOOKBOOK_GRADE', 'TAKES_PER_SHOT'",
