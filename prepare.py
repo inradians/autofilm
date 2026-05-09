@@ -2498,8 +2498,47 @@ def _critic_gemini_video(final_path: Path, script: dict) -> dict:
     raise RuntimeError("Gemini critic: no function_call returned")
 
 
+def encode_image_for_claude(
+    img_bytes_or_path: bytes | Path,
+    max_long_edge: int = 1024,
+    quality: int = 80,
+) -> tuple[str, str]:
+    """Downscale + JPEG-compress an image for transmission to Claude.
+
+    Anthropic's API has a 32 MB total request size limit. Native first-
+    frame PNGs at 1792x1024 are ~3 MB each base64; sending more than ~10
+    of them will trip the 413 Request Too Large error. Downscaling the
+    long edge to 1024 px and encoding JPEG q=80 brings each to
+    ~50-150 KB while keeping the image fully reviewable.
+
+    Accepts raw bytes (e.g. an extract_video_frame() return value) or a
+    Path to read from disk. Returns (media_type, base64_data) tuple.
+    """
+    from PIL import Image
+    import io
+
+    if isinstance(img_bytes_or_path, (str, Path)):
+        img = Image.open(img_bytes_or_path)
+    else:
+        img = Image.open(io.BytesIO(img_bytes_or_path))
+    if img.mode != "RGB":
+        img = img.convert("RGB")
+    w, h = img.size
+    scale = max_long_edge / max(w, h)
+    if scale < 1.0:
+        img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+    buf = io.BytesIO()
+    img.save(buf, "JPEG", quality=quality, optimize=True)
+    return "image/jpeg", base64.b64encode(buf.getvalue()).decode()
+
+
 def _critic_claude_stills(script: dict, frames: list[Path]) -> dict:
-    """Claude reviews representative stills as a second opinion."""
+    """Claude reviews representative stills as a second opinion.
+
+    Frames are downscaled and JPEG-compressed via encode_image_for_claude
+    before sending — at native 1792x1024 PNG, 16 frames base64-encoded
+    blows past Anthropic's 32 MB request size limit.
+    """
     content: list[dict] = [
         {"type": "text", "text": (
             "Score this generated film on the six axes via the tool.\n\n"
@@ -2508,13 +2547,10 @@ def _critic_claude_stills(script: dict, frames: list[Path]) -> dict:
         )},
     ]
     for p in frames:
+        media_type, data = encode_image_for_claude(p)
         content.append({
             "type": "image",
-            "source": {
-                "type": "base64",
-                "media_type": "image/png",
-                "data": base64.b64encode(p.read_bytes()).decode(),
-            },
+            "source": {"type": "base64", "media_type": media_type, "data": data},
         })
         content.append({"type": "text", "text": f"^ {p.parent.name}/{p.stem}"})
 

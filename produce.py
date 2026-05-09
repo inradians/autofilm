@@ -61,6 +61,7 @@ from prepare import (
     claude_tool,
     elevenlabs_sfx,
     extract_video_frame,
+    encode_image_for_claude,
     ffmpeg,
     flux_image,
     gen4_image,
@@ -2208,11 +2209,13 @@ def build_edl(exp: Experiment, storyboard: dict, clips_manifest: dict) -> dict:
             for i, take_path in enumerate(takes):
                 try:
                     frame = extract_video_frame(Path(take_path))
+                    media_type, data = encode_image_for_claude(frame)
                     content.append({
                         "type": "image",
                         "source": {
-                            "type": "base64", "media_type": "image/png",
-                            "data": base64.b64encode(frame).decode(),
+                            "type": "base64",
+                            "media_type": media_type,
+                            "data": data,
                         },
                     })
                     content.append({"type": "text", "text": f"  ^ {shot_id} take {i + 1}"})
