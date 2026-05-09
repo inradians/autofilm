@@ -891,13 +891,26 @@ def _generate_moodboard(prompt_text: str, slug: str,
     )
 
 
-CAST_SYSTEM = """You are a casting director for a virtual film adaptation.
-For each character, suggest one currently-working real actor. Provide a
-short rationale and an alternative. No deceased actors. No reuse across
-roles. Return only via the tool."""
+CAST_SYSTEM = """You are a casting director for a virtual film adaptation
+where every performer is a fully-fictional digital actor — no real,
+named human actors are used.
+
+For each character, write a virtual-actor card describing the kind of
+human you'd cast IF you had unlimited fabrication. Use ARCHETYPE
+language: physical type, age range, ethnicity (only if the character
+is canonically of a specific background), build, signature features,
+and an acting register (e.g. "subdued and watchful", "loose and
+playful").
+
+Do NOT name any real actor, celebrity, model, or public figure — living
+or deceased. The performer field is the *archetype*, not a person. Pick
+short evocative archetype labels like "weather-worn academic in his
+fifties" or "wiry teen with a quick suspicious gaze". Provide a short
+rationale tying the archetype to the character. No reuse of identical
+archetypes across roles. Return only via the tool."""
 
 CAST_TOOL_SCHEMA = {
-    "description": "Submit casting choices.",
+    "description": "Submit virtual casting choices (no real actors).",
     "input_schema": {
         "type": "object",
         "properties": {
@@ -907,9 +920,15 @@ CAST_TOOL_SCHEMA = {
                     "type": "object",
                     "properties": {
                         "character_id": {"type": "string"},
-                        "actor": {"type": "string"},
+                        "actor": {
+                            "type": "string",
+                            "description": "Virtual archetype label (≤12 words). NEVER a real person's name.",
+                        },
                         "rationale": {"type": "string"},
-                        "alternative": {"type": "string"},
+                        "alternative": {
+                            "type": "string",
+                            "description": "Backup virtual archetype.",
+                        },
                     },
                     "required": ["character_id", "actor"],
                 },
@@ -1067,13 +1086,17 @@ LOOKBOOK_TOOL_SCHEMA = {
 def _load_user_moodboards(exp: Experiment) -> list[bytes]:
     """Read user-uploaded moodboard images for this experiment's book.
 
-    Saved by the UI server to experiments/<book_slug>/user_moodboards/.
-    Returns a list of image bytes in lexicographic filename order, or
-    an empty list if the directory doesn't exist or is empty.
+    These are the **general creative aesthetic / "vibe" references** for
+    the whole movie — not per-scene or per-character. The lookbook stage
+    uses them as style refs when generating the master style frame, so
+    the entire film inherits the user's intended look.
 
-    Located per-book (not per-experiment) so uploaded references carry
-    forward across iterations of the autoresearch loop without the user
-    re-uploading them each time.
+    Saved by the UI server to experiments/<book_slug>/user_moodboards/.
+    Returns image bytes in lexicographic filename order, or [] if the
+    directory doesn't exist or is empty.
+
+    Located per-book (not per-experiment) so refs survive across all
+    iterations of the autoresearch loop without re-uploading.
     """
     mb_dir = EXPERIMENTS_DIR / exp.book_slug / "user_moodboards"
     if not mb_dir.is_dir():
@@ -1575,8 +1598,10 @@ def build_narration(exp: Experiment, script: dict, cast: list[dict]) -> None:
 def first_frame_prompt(lookbook: dict, shot: dict, scene: dict,
                         chars_in_shot: list[dict], actors_in_shot: list[str],
                         location: dict | None) -> str:
+    # Virtual characters: blend the canonical book description with the
+    # archetype label. No real-actor attribution.
     char_lines = "\n".join(
-        f"  - {c['name']} (played by {a}): {c.get('description', '')}"
+        f"  - {c['name']} — {a}. {c.get('description', '')}"
         for c, a in zip(chars_in_shot, actors_in_shot)
     ) or "  (no on-screen characters)"
     loc_text = location["description"][:300] if location else scene["location"]
@@ -1748,16 +1773,22 @@ def veo_prompt(lookbook: dict, shot: dict, scene: dict,
 
     char_block = ""
     if chars_in_shot:
-        char_lines = [f"{c['name']} (played by {a})"
+        # Virtual-archetype phrasing — never says "played by <real actor>".
+        # The "actor" field is now an archetype label like "weather-worn
+        # academic in his fifties", so we surface it as a casting note
+        # rather than as a real-person attribution.
+        char_lines = [f"{c['name']} ({a})"
                       for c, a in zip(chars_in_shot, actors_in_shot)]
         char_block = f"CHARACTERS: {', '.join(char_lines)}.\n"
 
     dialogue_block = ""
     if shot.get("dialogue_excerpt"):
         speaker = chars_in_shot[0]["name"] if chars_in_shot else "the character"
-        actor = actors_in_shot[0] if actors_in_shot else ""
+        # Voice direction comes from the character's archetype, not from
+        # any real actor's voice. We omit the explicit "in X's voice"
+        # because the model would otherwise try to mimic a real person.
         dialogue_block = (
-            f"DIALOGUE (synchronized native audio in {actor}'s voice): "
+            f"DIALOGUE (synchronized native audio): "
             f"{speaker}: \"{shot['dialogue_excerpt']}\"\n"
         )
 

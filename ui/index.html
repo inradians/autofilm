@@ -246,6 +246,45 @@
     font-family: ui-monospace, monospace;
   }
 
+  /* Cost card */
+  .cost {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 6px; padding: 14px 18px; margin: 18px 0;
+    display: grid; grid-template-columns: auto 1fr; gap: 14px 22px;
+    align-items: start;
+  }
+  .cost .total {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  .cost .total .v {
+    font-size: 22px; font-weight: 600; color: var(--accent);
+    line-height: 1;
+  }
+  .cost .total .label {
+    font-size: 10px; text-transform: uppercase; color: var(--muted);
+    letter-spacing: 0.06em; margin-bottom: 4px;
+  }
+  .cost .breakdown {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 12px 24px;
+    font-size: 12px;
+  }
+  .cost .breakdown h5 {
+    margin: 0 0 6px; font-size: 10px; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--muted); font-weight: 600;
+  }
+  .cost .breakdown .row {
+    display: flex; justify-content: space-between;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 11px; color: var(--ink);
+    padding: 1px 0;
+  }
+  .cost .breakdown .row .v { color: var(--accent); }
+  .cost .meta {
+    grid-column: 1 / -1;
+    font-size: 11px; color: var(--muted);
+    font-family: ui-monospace, monospace;
+  }
+
   details { margin-top: 8px; }
   details summary { cursor: pointer; color: var(--muted); font-size: 12px; }
   details summary:hover { color: var(--ink); }
@@ -289,9 +328,13 @@
       </div>
 
       <div class="field">
-        <label for="moodboards">moodboard examples (optional)</label>
+        <label for="moodboards">moodboards — general aesthetic / "vibe"</label>
         <input id="moodboards" name="moodboards" type="file"
                accept="image/png,image/jpeg,image/webp" multiple />
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">
+          Reference images for the overall look of the film. Not
+          per-scene — these set the master style frame.
+        </div>
       </div>
 
       <div class="field">
@@ -386,6 +429,8 @@ const $ = (id) => document.getElementById(id);
 let pipelineStages = [];   // populated from /api/state
 let selectedExpKey = "";   // empty = follow latest
 let lastExperimentList = [];
+let currentlyShownKey  = "";   // last exp we actually rendered
+let appliedLastRun     = false; // populate-from-last-run only once
 
 // ── Render helpers ──────────────────────────────────────────
 
@@ -422,6 +467,66 @@ function makeStageSection(title) {
   h4.textContent = title;
   s.appendChild(h4);
   return s;
+}
+
+function fmtUSD(v) {
+  if (v == null) return '—';
+  if (v >= 100)   return `$${v.toFixed(0)}`;
+  if (v >= 1)     return `$${v.toFixed(2)}`;
+  if (v >= 0.01)  return `$${v.toFixed(3)}`;
+  return `$${v.toFixed(4)}`;
+}
+
+function renderCost(cost) {
+  const wrap = document.createElement('div');
+  wrap.className = 'cost';
+
+  const total = document.createElement('div');
+  total.className = 'total';
+  total.innerHTML = `
+    <div class="label">total cost</div>
+    <div class="v">${fmtUSD(cost.total_usd)}</div>
+  `;
+  wrap.appendChild(total);
+
+  const breakdown = document.createElement('div');
+  breakdown.className = 'breakdown';
+
+  // by model
+  const byModel = document.createElement('div');
+  byModel.innerHTML = '<h5>by model</h5>';
+  for (const [m, v] of Object.entries(cost.by_model || {})) {
+    if (v <= 0) continue;
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.innerHTML = `<span>${m || '(unknown)'}</span><span class="v">${fmtUSD(v)}</span>`;
+    byModel.appendChild(row);
+  }
+  breakdown.appendChild(byModel);
+
+  // by stage
+  const byStage = document.createElement('div');
+  byStage.innerHTML = '<h5>by stage</h5>';
+  for (const [s, v] of Object.entries(cost.by_stage || {})) {
+    if (v <= 0) continue;
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.innerHTML = `<span>${s}</span><span class="v">${fmtUSD(v)}</span>`;
+    byStage.appendChild(row);
+  }
+  breakdown.appendChild(byStage);
+
+  wrap.appendChild(breakdown);
+
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  let m = `${cost.n_calls} api call${cost.n_calls === 1 ? '' : 's'}`;
+  if (cost.n_unknown) m += ` · ${cost.n_unknown} unknown-rate`;
+  m += ` · estimates ±20%, treat as approximate`;
+  meta.textContent = m;
+  wrap.appendChild(meta);
+
+  return wrap;
 }
 
 function renderExperimentDetail(data, isLive = false) {
@@ -493,6 +598,11 @@ function renderExperimentDetail(data, isLive = false) {
       p.textContent = `regen vs parent: ${flags.join(', ')}`;
       container.appendChild(p);
     }
+  }
+
+  // Cost breakdown
+  if (data.cost && data.cost.n_calls > 0) {
+    container.appendChild(renderCost(data.cost));
   }
 
   if (!data.bible || !data.bible.stages) {
@@ -772,6 +882,14 @@ async function poll() {
     $('startBtn').style.display = data.run.is_running ? 'none' : '';
     $('stopBtn').style.display  = data.run.is_running ? '' : 'none';
 
+    // First-load: populate form from persisted last-run config so the
+    // user doesn't re-type the book path. We only do this once and only
+    // when fields haven't already been filled by something else.
+    if (!appliedLastRun && data.last_run_config) {
+      appliedLastRun = true;
+      applyDefaultsFromConfig(data.last_run_config);
+    }
+
     // Update dropdown if experiment list changed.
     const newKeys = data.experiments.map(e => e.qualified).join('|');
     const oldKeys = lastExperimentList.map(e => e.qualified).join('|');
@@ -795,11 +913,17 @@ async function poll() {
       }
     }
 
-    if (showKey) {
+    // Always re-fetch the experiment detail when (a) the key changed,
+    // or (b) we're viewing a live run — that's how new artifacts show
+    // up the moment they're written.
+    const keyChanged = showKey !== currentlyShownKey;
+    if (showKey && (keyChanged || isLive)) {
       const detail = await loadExperimentDetail(showKey);
       if (detail) renderExperimentDetail(detail, isLive);
-    } else {
+      currentlyShownKey = showKey;
+    } else if (!showKey) {
       $('mainArea').innerHTML = '<div class="empty">No experiments yet — start a run to populate this view.</div>';
+      currentlyShownKey = '';
     }
 
     $('meta').textContent =

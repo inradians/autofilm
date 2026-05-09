@@ -79,6 +79,17 @@ def _rel(p: Path, root: Path) -> str:
 
 def build_production_bible_json(exp: Experiment) -> Path:
     """Write production_bible.json to the experiment dir. Returns its path."""
+    bible = build_production_bible_dict(exp)
+    return exp.write_json("production_bible.json", bible)
+
+
+def build_production_bible_dict(exp: Experiment) -> dict[str, Any]:
+    """Build the production-bible manifest WITHOUT writing it.
+
+    This is the pure-function form, useful for the UI server which calls
+    it on every poll to get a live filesystem snapshot. The shape matches
+    what's written to production_bible.json.
+    """
     root = exp.root
     bible: dict[str, Any] = {
         "exp_id":        f"{exp.book_slug}/{exp.exp_id}",
@@ -307,8 +318,7 @@ def build_production_bible_json(exp: Experiment) -> Path:
     if exp.has("carryover.json"):
         bible["carryover_from_parent"] = exp.read_json("carryover.json")
 
-    out = exp.write_json("production_bible.json", bible)
-    return out
+    return bible
 
 
 def _print_summary(p: Path) -> None:

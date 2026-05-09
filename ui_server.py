@@ -71,6 +71,41 @@ UI_DIR     = PROJECT_ROOT / "ui"
 UPLOAD_DIR = Path.home() / ".autofilm" / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
+# Persistent "last run" config — written on successful start, loaded on
+# page refresh so the user doesn't have to re-type the book path each
+# time. Stored outside any experiment dir so it survives across books.
+LAST_RUN_FILE = Path.home() / ".autofilm" / "last_run.json"
+
+
+def _load_last_run() -> dict[str, Any] | None:
+    if not LAST_RUN_FILE.exists():
+        return None
+    try:
+        return json.loads(LAST_RUN_FILE.read_text())
+    except Exception:
+        return None
+
+
+def _save_last_run(config: dict[str, Any]) -> None:
+    """Persist a slim subset of the start config so we don't leak large
+    file lists or transient runtime fields."""
+    slim = {
+        "book_path":        config.get("book_path"),
+        "book_filename":    config.get("book_filename"),
+        "book_slug":        config.get("book_slug"),
+        "iterations":       config.get("iterations"),
+        "target_loss":      config.get("target_loss"),
+        "threshold":        config.get("threshold"),
+        "director":         config.get("director"),
+        "cinematographer":  config.get("cinematographer"),
+        "saved_at":         time.time(),
+    }
+    try:
+        LAST_RUN_FILE.parent.mkdir(parents=True, exist_ok=True)
+        LAST_RUN_FILE.write_text(json.dumps(slim, indent=2))
+    except Exception:
+        pass
+
 
 # ── Stage definitions (must match produce.py / run_loop.py output) ───────────
 
@@ -322,16 +357,29 @@ def api_state() -> Any:
         })
 
     return jsonify({
-        "run":         run_state.snapshot(),
-        "smoke":       smoke_state.snapshot(),
-        "experiments": items[:60],
-        "stages":      PIPELINE_STAGES,
+        "run":              run_state.snapshot(),
+        "smoke":            smoke_state.snapshot(),
+        "experiments":      items[:60],
+        "stages":           PIPELINE_STAGES,
+        "last_run_config":  _load_last_run(),
     })
 
 
 @app.get("/api/experiment/<book_slug>/<exp_id>")
 def api_experiment(book_slug: str, exp_id: str) -> Any:
-    """Full data for one experiment: production_bible.json + run_config.json."""
+    """Full data for one experiment.
+
+    The bible is built ON THE FLY from the filesystem (not read from the
+    on-disk production_bible.json) so the UI sees content the moment it
+    appears under the experiment dir — no need to wait for the pipeline
+    to write the manifest at the end.
+
+    Cost is estimated from prompts.json via cost.aggregate_costs().
+    """
+    from prepare import Experiment  # late import to avoid circular
+    from production_bible import build_production_bible_dict
+    from cost import aggregate_costs
+
     exp_root = EXPERIMENTS_DIR / book_slug / exp_id
     if not exp_root.is_dir():
         abort(404)
@@ -342,15 +390,26 @@ def api_experiment(book_slug: str, exp_id: str) -> Any:
         "book_slug":   book_slug,
         "has_final":   (exp_root / "final.mp4").exists(),
     }
-    pb = exp_root / "production_bible.json"
-    if pb.exists():
-        try:
-            out["bible"] = json.loads(pb.read_text())
-        except Exception as e:  # noqa: BLE001
-            out["bible_error"] = str(e)
+
+    # Live bible (filesystem-scanned, always current).
+    try:
+        exp = Experiment(exp_id=exp_id, root=exp_root)
+        out["bible"] = build_production_bible_dict(exp)
+    except Exception as e:  # noqa: BLE001
+        out["bible_error"] = str(e)
+
+    # Run config (defaults for the form when this exp is selected).
     rc = _load_run_config(exp_root)
     if rc:
         out["run_config"] = rc
+
+    # Cost breakdown (per-model + per-stage, plus cumulative across the
+    # iteration chain if this exp has parents).
+    try:
+        out["cost"] = aggregate_costs(exp_root)
+    except Exception as e:  # noqa: BLE001
+        out["cost_error"] = str(e)
+
     return jsonify(out)
 
 
@@ -474,6 +533,9 @@ def api_start() -> Any:
 
     run_state.config = config
     _spawn_subprocess(run_state, cmd, env=env)
+
+    # Persist these settings as the new defaults for the next page load.
+    _save_last_run(config)
 
     return jsonify({"ok": True, "config": config})
 
