@@ -368,7 +368,18 @@ def google_veo(
             f"Google Veo ({GOOGLE_VEO_MODEL}) timed out after 10 minutes"
         )
 
-    vids = operation.response.generated_videos
+    # When Veo's safety filter blocks a prompt, the operation's response
+    # is None (not an empty .generated_videos list). Surface a proper
+    # message so the cascade fallback log isn't filled with cryptic
+    # AttributeError tracebacks.
+    response = getattr(operation, "response", None)
+    if response is None:
+        raise RuntimeError(
+            "Google Veo: response was None (likely safety-filter block "
+            "or upstream rejection). Falling through to the next backend."
+        )
+
+    vids = getattr(response, "generated_videos", None)
     if not vids:
         raise RuntimeError("Google Veo: no videos returned")
 

@@ -2243,53 +2243,96 @@ def _resolution_dims() -> tuple[int, int]:
 
 def compile_final(exp: Experiment, script: dict, storyboard: dict,
                    clips_manifest: dict, edl: dict, lookbook: dict) -> Path:
-    # moviepy v1 uses moviepy.editor; v2 removed it (everything at top level
-    # with renamed methods). We pin to <2.0.0 in pyproject.toml but guard
-    # here so a mis-installed v2 gives a clear error rather than a traceback.
+    # moviepy 1.x and 2.x have different APIs and can't be told apart by
+    # import alone (some 2.x installs ship a backwards-compat
+    # ``moviepy.editor`` shim that re-exports the v2 classes). We import
+    # whichever works, then dispatch each operation by INSPECTING the
+    # actual method names on the resulting class — that way we don't
+    # care which major version is installed.
     try:
         from moviepy.editor import (
             AudioFileClip, CompositeAudioClip, VideoFileClip,
-            concatenate_videoclips, afx,
+            concatenate_videoclips,
         )
-        _moviepy_v1 = True
     except ModuleNotFoundError:
-        # v2 fallback — import the renamed equivalents.
         from moviepy import (  # type: ignore[no-redef]
             AudioFileClip, CompositeAudioClip, VideoFileClip,
             concatenate_videoclips,
         )
-        import moviepy.audio.fx as afx  # type: ignore[no-redef]
-        _moviepy_v1 = False
-        import warnings
-        warnings.warn(
-            "moviepy v2 detected. Pin 'moviepy<2.0.0' in pyproject.toml and "
-            "run 'uv sync' to avoid API incompatibilities.",
-            stacklevel=2,
-        )
+
+    try:
+        import moviepy.audio.fx as afx          # noqa: F401  (used in v1 fx() path)
+    except Exception:                           # noqa: BLE001
+        afx = None  # v2 may not expose it the same way
+
+    _mp_version = getattr(__import__("moviepy"), "__version__", "?")
+    print(f"  moviepy {_mp_version}: dispatching by method introspection")
 
     def _subclip(clip, t_start, t_end=None):
-        """moviepy v1/v2 compatible subclip."""
-        if _moviepy_v1:
-            return clip.subclip(t_start, t_end) if t_end is not None else clip.subclip(t_start)
-        return clip.subclipped(t_start, t_end) if t_end is not None else clip.subclipped(t_start)
+        """v1: clip.subclip / v2: clip.subclipped."""
+        fn = getattr(clip, "subclipped", None) or getattr(clip, "subclip", None)
+        if fn is None:
+            raise AttributeError("clip has neither subclipped nor subclip")
+        return fn(t_start, t_end) if t_end is not None else fn(t_start)
 
     def _volume(clip, factor: float):
-        """moviepy v1/v2 compatible volume adjustment."""
-        if _moviepy_v1:
+        """Volume scale by factor.
+
+        v2.x:    clip.with_volume_scaled(factor)
+        v2 mid:  clip.multiply_volume(factor)
+        v1.x:    clip.fx(afx.volumex, factor)
+
+        We pick the first one that exists. ``with_volume_scaled`` is the
+        canonical v2 form per moviepy.org docs.
+        """
+        for name in ("with_volume_scaled", "multiply_volume"):
+            fn = getattr(clip, name, None)
+            if fn is not None:
+                return fn(factor)
+        # Fall back to the v1 effect path.
+        if afx is not None and hasattr(afx, "volumex"):
             return clip.fx(afx.volumex, factor)
-        return clip.multiply_volume(factor)
+        raise AttributeError(
+            f"no compatible volume method on {type(clip).__name__} "
+            f"(tried with_volume_scaled, multiply_volume, fx(volumex))"
+        )
 
     def _loop_to(clip, duration: float):
-        """moviepy v1/v2 compatible audio looping to target duration."""
-        if _moviepy_v1:
+        """Loop a clip out to ``duration`` seconds.
+
+        v2 high-level helper:    clip.with_loop(duration=...)   (some builds)
+        v2 effect-based form:    clip.with_effects([afx.AudioLoop(duration=...)])
+        v2 mid-build:            clip.audio_loop(duration=...)
+        v1 fx-style:             clip.fx(afx.audio_loop, duration=...)
+        """
+        for name in ("with_loop", "audio_loop", "loop"):
+            fn = getattr(clip, name, None)
+            if fn is not None:
+                try:
+                    return fn(duration=duration)
+                except TypeError:
+                    return fn(duration)
+        # Effect-based fallback (v2 canonical).
+        try:
+            from moviepy.audio.fx.AudioLoop import AudioLoop  # type: ignore
+            return clip.with_effects([AudioLoop(duration=duration)])
+        except Exception:                                         # noqa: BLE001
+            pass
+        if afx is not None and hasattr(afx, "audio_loop"):
             return clip.fx(afx.audio_loop, duration=duration)
-        return clip.loop(duration=duration)
+        raise AttributeError(
+            f"no compatible loop method on {type(clip).__name__}"
+        )
 
     def _set_audio(video_clip, audio_clip):
-        """moviepy v1/v2 compatible set_audio."""
-        if _moviepy_v1:
-            return video_clip.set_audio(audio_clip)
-        return video_clip.with_audio(audio_clip)
+        """v1: video.set_audio / v2: video.with_audio."""
+        fn = getattr(video_clip, "with_audio", None) \
+             or getattr(video_clip, "set_audio", None)
+        if fn is None:
+            raise AttributeError(
+                "VideoFileClip has neither with_audio nor set_audio"
+            )
+        return fn(audio_clip)
 
     decision_by_shot = {(d["scene_id"], d["shot_id"]): d for d in edl["decisions"]}
     scene_order = [s["id"] for s in script["scenes"]]
