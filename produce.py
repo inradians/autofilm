@@ -132,6 +132,10 @@ REFERENCE_IMAGE_MODEL: str = os.getenv("REFERENCE_IMAGE_MODEL", FLUX_PRO_MODEL)
 # Thread-safe print — prevents interleaved output from parallel workers.
 _PRINT_LOCK = threading.Lock()
 
+# Serialises DuckDuckGo image searches — DDG 403-rate-limits concurrent
+# requests, so all photo fetches must go through this lock one at a time.
+_PHOTO_SEARCH_LOCK = threading.Lock()
+
 
 def _tprint(*args, **kwargs) -> None:
     """Thread-safe print. Use inside parallel worker functions."""
@@ -771,58 +775,66 @@ def style_preamble(lookbook: dict) -> str:
 # ============================================================================
 
 def _fetch_actor_photos(actor: str, n: int = 3) -> list[bytes]:
-    """Web search for press/official photos of an actor and return up to n
-    as raw image bytes.
+    """Web search for press/official photos of an actor, return up to n bytes.
 
-    Why: naming celebrities in image-gen prompts triggers content-policy
-    filters on Runway (and creates likeness-rights issues). Instead we fetch
-    real photos and pass them as reference images tagged 'person_x', so the
-    model matches the appearance without knowing the name.
+    Searches are serialised via _PHOTO_SEARCH_LOCK — DDG 403-rate-limits
+    concurrent requests, so parallel reference-image workers must not call
+    this simultaneously. The in-memory cache in build_references means each
+    actor is only searched once per run regardless of how many scenes they
+    appear in.
 
-    Returns an empty list if duckduckgo_search is not installed or if all
-    downloads fail — the caller handles missing photos gracefully (falls back
-    to description-only generation).
+    Returns an empty list on any failure; caller falls back gracefully.
     """
     try:
-        from duckduckgo_search import DDGS
+        from ddgs import DDGS                           # new package name
     except ImportError:
-        print(f"    [photos] duckduckgo-search not installed; skipping web photo fetch.")
-        print(f"            Run: uv add duckduckgo-search")
-        return []
+        try:
+            from duckduckgo_search import DDGS          # old name fallback # type: ignore[no-redef]
+        except ImportError:
+            _tprint("    [photos] ddgs not installed; skipping web photo fetch."
+                    "  Run: uv add ddgs")
+            return []
+
+    _tprint(f"    [photos] searching for {actor}...")
+    results: list[dict] = []
+
+    with _PHOTO_SEARCH_LOCK:
+        try:
+            with DDGS() as ddgs:
+                results = list(ddgs.images(
+                    f"{actor} actor official press portrait headshot",
+                    max_results=n * 4,
+                    safesearch="on",
+                ))
+        except Exception as e:
+            _tprint(f"    [photos] DDG search failed ({e}); skipping")
+            return []
+        finally:
+            import time as _time
+            _time.sleep(1.2)    # polite pause before next search
 
     photos: list[bytes] = []
-    print(f"    [photos] searching for {actor}...")
-    try:
-        with DDGS() as ddgs:
-            results = list(ddgs.images(
-                f"{actor} actor official press portrait headshot",
-                max_results=n * 4,   # over-fetch — some URLs will fail
-                safesearch="on",
-            ))
-        for r in results:
-            if len(photos) >= n:
-                break
-            url = r.get("image", "")
-            if not url:
-                continue
-            try:
-                resp = httpx.get(
-                    url, timeout=15.0, follow_redirects=True,
-                    headers={"User-Agent": "Mozilla/5.0 (compatible; autofilm/1.0)"},
-                )
-                data = resp.content
-                # Accept JPEG, PNG, WebP — reject HTML error pages and tiny blobs.
-                is_jpeg = data[:3] == b"\xff\xd8\xff"
-                is_png  = data[:8] == b"\x89PNG\r\n\x1a\n"
-                is_webp = data[:4] == b"RIFF" and data[8:12] == b"WEBP"
-                if (is_jpeg or is_png or is_webp) and len(data) >= 10_000:
-                    photos.append(data)
-            except Exception:
-                continue
-    except Exception as e:
-        print(f"    [photos] search failed ({e}); continuing without web photos")
+    for r in results:
+        if len(photos) >= n:
+            break
+        url = r.get("image", "")
+        if not url:
+            continue
+        try:
+            resp = httpx.get(
+                url, timeout=15.0, follow_redirects=True,
+                headers={"User-Agent": "Mozilla/5.0 (compatible; autofilm/1.0)"},
+            )
+            data = resp.content
+            is_jpeg = data[:3] == b"\xff\xd8\xff"
+            is_png  = data[:8] == b"\x89PNG\r\n\x1a\n"
+            is_webp = data[:4] == b"RIFF" and data[8:12] == b"WEBP"
+            if (is_jpeg or is_png or is_webp) and len(data) >= 10_000:
+                photos.append(data)
+        except Exception:
+            continue
 
-    print(f"    [photos] fetched {len(photos)}/{n} photo(s) for {actor}")
+    _tprint(f"    [photos] fetched {len(photos)}/{n} photo(s) for {actor}")
     return photos
 
 
