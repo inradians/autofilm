@@ -271,14 +271,20 @@ def main() -> int:
         if bible_path.exists():
             try:
                 bib = json.loads(bible_path.read_text())
-                parent_exp = bib.get("parent_exp")
-                if parent_exp == iter_dirs[0].name:
+                parent_exp = bib.get("parent_exp") or ""
+                # production_bible.py writes parent_exp as the qualified
+                # form '<book_slug>/exp_NNN' — accept either that or the
+                # bare 'exp_NNN' so this test is robust to either schema.
+                expected_bare      = iter_dirs[0].name
+                expected_qualified = f"{book_root.name}/{expected_bare}"
+                if parent_exp in (expected_bare, expected_qualified):
                     parent_ok = True
                     print(f"  ✓ {iter_dirs[1].name} → parent_exp = "
-                          f"{iter_dirs[0].name} (carryover applied)")
+                          f"{parent_exp!r} (carryover applied)")
                 else:
                     print(f"  ✗ {iter_dirs[1].name} → parent_exp = "
-                          f"{parent_exp!r}, expected {iter_dirs[0].name!r}")
+                          f"{parent_exp!r}, expected "
+                          f"{expected_bare!r} or {expected_qualified!r}")
             except Exception as e:                                 # noqa: BLE001
                 print(f"  ⚠ couldn't parse {iter_dirs[1].name}/production_bible.json: {e}")
         else:
