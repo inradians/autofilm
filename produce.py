@@ -48,6 +48,7 @@ from prepare import (
     LTX_VIDEO_MODEL,
     MAX_PLANNED_SHOT_SECONDS,
     MAX_SCENES,
+    MAX_SHOTS_PER_SCENE,
     NANO_BANANA_MODEL,
     REVE_API_BASE,
     SEEDANCE2_MODEL,
@@ -1717,12 +1718,28 @@ SHOTLIST_TOOL_SCHEMA = {
 
 
 def shot_list_for_scene(scene: dict) -> list[dict]:
-    return claude_tool(
+    # When MAX_SHOTS_PER_SCENE is set (smoke-test mode), nudge the
+    # model toward exactly that many shots and truncate as a safety
+    # net. Saves Claude tokens and ensures the cap holds even if the
+    # model overshoots the hint.
+    extra_hint = ""
+    if MAX_SHOTS_PER_SCENE > 0:
+        extra_hint = (
+            f"\n\nIMPORTANT: produce EXACTLY {MAX_SHOTS_PER_SCENE} "
+            f"shot(s) for this scene. Cover the most essential beat."
+        )
+    shots = claude_tool(
         system=SHOTLIST_SYSTEM,
-        user_content=f"Scene:\n{json.dumps(scene, indent=2)}\n\nBreak it into shots.",
+        user_content=(
+            f"Scene:\n{json.dumps(scene, indent=2)}"
+            f"\n\nBreak it into shots.{extra_hint}"
+        ),
         tool_name="submit_shotlist",
         tool_schema=SHOTLIST_TOOL_SCHEMA,
     )["shots"]
+    if MAX_SHOTS_PER_SCENE > 0:
+        shots = shots[:MAX_SHOTS_PER_SCENE]
+    return shots
 
 
 def build_storyboard(exp: Experiment, script: dict) -> dict:

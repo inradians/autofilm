@@ -72,8 +72,13 @@ except ImportError:
 # CONSTANTS — SOTA stack as of April 2026
 # ============================================================================
 PROJECT_ROOT = Path(__file__).resolve().parent
-EXPERIMENTS_DIR = PROJECT_ROOT / "experiments"
-EXPERIMENTS_DIR.mkdir(exist_ok=True)
+# EXPERIMENTS_DIR can be overridden by AUTOFILM_EXPERIMENTS_DIR for
+# isolated test runs (e.g. the run-loop e2e smoke test) — defaults
+# to <project>/experiments for normal use.
+EXPERIMENTS_DIR = Path(
+    os.getenv("AUTOFILM_EXPERIMENTS_DIR", "")
+) or (PROJECT_ROOT / "experiments")
+EXPERIMENTS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Source book — set BOOK_PDF_PATH env var to point at any PDF. The
 # pipeline derives a per-book slug from the filename so multiple books
@@ -84,6 +89,9 @@ BOOK_PDF_PATH = Path(os.getenv("BOOK_PDF_PATH", ""))
 # Cap on how many scenes to render per experiment. Keeps each run on a
 # fixed budget, like autoresearch's 5-min training cap.
 MAX_SCENES = int(os.getenv("MAX_SCENES", "3"))
+# When > 0, cap each scene's shot list to this many shots. 0 = no cap.
+# Set to 1 for the run-loop smoke test (1 scene × 1 shot).
+MAX_SHOTS_PER_SCENE = int(os.getenv("MAX_SHOTS_PER_SCENE", "0"))
 
 # --- Models (SOTA stack as of May 2026, accessed via Runway + Anthropic + Stability) ---
 # Anthropic: Claude Opus 4.7 (text only — critic moved to Gemini-only).
