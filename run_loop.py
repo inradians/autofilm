@@ -116,9 +116,10 @@ def run_loop(
                 metric = prev_exp.read_json("metric.json")
                 plan   = plan_carryover(metric, priority_threshold=threshold)
                 print(f"\n  Carryover plan: {plan_summary(plan)}")
-                if plan.get("manual_review"):
-                    print(f"  ({len(plan['manual_review'])} change(s) flagged "
-                          f"for manual review — not auto-applied)")
+                # Every change is auto-applied now — either via keyword
+                # matching or via axis-based fallback in plan_carryover.
+                # No manual_review surface; the autoresearch loop is
+                # 100% automated.
                 exp = Experiment.new_iteration(prev_exp, carryover=plan)
 
         _print_banner(i, iterations, f"{exp.book_slug}/{exp.exp_id}")

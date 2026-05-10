@@ -416,6 +416,71 @@ PARSE_TOOL_SCHEMA = {
 }
 
 
+def _parse_refinement_block(exp: Experiment) -> str:
+    """Build a critic-feedback block to append to parse_script's user
+    prompt when regenerating script after an iteration.
+
+    Reads parent_metric.json (written by Experiment.new_iteration) and
+    extracts changes that are likely actionable at the script layer:
+      - axis == "fidelity"  → faithfulness to source
+      - target / suggested_change mentions script-layer terms
+        ("screenplay", "scene", "story", "dialogue", "narration",
+         "opening", "structure")
+
+    Returns an empty string when there's no parent metric or no
+    relevant changes — so the prompt is identical to a fresh first-
+    iteration parse.
+    """
+    parent_metric_path = exp.path("parent_metric.json")
+    if not parent_metric_path.exists():
+        return ""
+    try:
+        m = json.loads(parent_metric_path.read_text())
+    except Exception:                                              # noqa: BLE001
+        return ""
+    changes = m.get("changes") or []
+    if not changes:
+        return ""
+
+    SCRIPT_TERMS = (
+        "script", "screenplay", "scene", "story", "narrative",
+        "dialogue", "narration", "voice-over", "v.o.", "opening",
+        "structure", "beat", "exposition", "act ", "fidelity",
+        "source material", "book", "novel",
+    )
+
+    relevant = []
+    for ch in changes:
+        text = " ".join(str(ch.get(k, "")) for k in
+                        ("axis", "target", "current_behavior",
+                         "suggested_change", "expected_impact")).lower()
+        if ch.get("axis") == "fidelity" or any(t in text for t in SCRIPT_TERMS):
+            relevant.append(ch)
+    if not relevant:
+        return ""
+
+    # Render as compact bullets so we don't bloat the parse prompt.
+    # Cap at the top 8 changes by priority so the user prompt stays
+    # focused — Claude can only meaningfully act on a handful of
+    # script-layer notes per pass.
+    pri = {"high": 0, "medium": 1, "low": 2}
+    relevant.sort(key=lambda c: pri.get((c.get("priority") or "low").lower(), 3))
+    lines = ["", "", "REFINEMENT NOTES from the previous iteration's "
+             "critic — incorporate where they make the adaptation more "
+             "faithful and more cinematic, while staying grounded in "
+             "this book's actual text:"]
+    for ch in relevant[:8]:
+        suggestion = (ch.get("suggested_change") or "").strip()
+        target     = (ch.get("target") or "").strip()
+        axis       = (ch.get("axis") or "").strip()
+        priority   = (ch.get("priority") or "").strip()
+        if suggestion:
+            tag = f"[{axis}/{priority}]" if axis else ""
+            scope = f" ({target})" if target and target != axis else ""
+            lines.append(f"  - {tag}{scope} {suggestion}")
+    return "\n".join(lines)
+
+
 def parse_script(exp: Experiment) -> dict:
     if exp.has("script.json"):
         cached = exp.read_json("script.json")
@@ -473,11 +538,27 @@ def parse_script(exp: Experiment) -> dict:
     book_title  = ""
     book_author = ""
 
+    # If this is an iteration AFTER the first, and the carryover plan
+    # invalidated script.json, the previous critic's feedback lives at
+    # parent_metric.json (written by Experiment.new_iteration). Fold
+    # the script-relevant suggestions into the parse prompt so the
+    # next pass actually responds to what the reviewer flagged —
+    # otherwise re-parsing the same book gives the same script and
+    # the autoresearch loop has no signal on the script axis.
+    refinement_block = _parse_refinement_block(exp)
+    if refinement_block:
+        print(f"  → folding {refinement_block.count(chr(10)) // 2 + 1} "
+              f"script-related critic note(s) from parent into parse prompt")
+
     for s, e, text in chunks:
         prior = json.dumps([{"id": c["id"], "name": c["name"]} for c in characters])
         result = claude_tool(
             system=PARSE_SYSTEM,
-            user_content=f"BOOK pp.{s}-{e}:\n\n{text}\n\nPrior characters (reuse IDs):\n{prior}",
+            user_content=(
+                f"BOOK pp.{s}-{e}:\n\n{text}\n\n"
+                f"Prior characters (reuse IDs):\n{prior}"
+                f"{refinement_block}"
+            ),
             tool_name="submit_extraction",
             tool_schema=PARSE_TOOL_SCHEMA,
             max_tokens=8000,

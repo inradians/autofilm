@@ -54,9 +54,11 @@ Heuristics — keyword-based mapping from change.target / change.suggested_chang
   Cites a specific scene_id or shot_id in target / suggested_change
     → narrow to that scene / shot.
 
-  Otherwise (vague aesthetic note, no clear surface) — appended to a
-  "manual_review" list and not auto-applied; the human can edit produce.py
-  before the next iteration.
+  Otherwise — falls back to axis-based routing using the critic's
+  `axis` field (cinematography / color / sound / acting / continuity /
+  fidelity). Every change drives a concrete pipeline action; nothing
+  is ever flagged for manual review. The autoresearch loop is fully
+  automated.
 
 Run as a module:
     from carryover import plan_carryover
@@ -294,7 +296,51 @@ def plan_carryover(
                 "triggered":   triggered,
             })
         else:
-            plan["manual_review"].append(change)
+            # Axis-based fallback: the critic always tags every change
+            # with an axis (cinematography / color / sound / acting /
+            # continuity / fidelity) — even when the suggestion text
+            # is too vague to keyword-match. Use the axis to pick a
+            # default invalidation surface. This guarantees every
+            # change drives a concrete pipeline action — no human in
+            # the loop.
+            axis = (change.get("axis") or "").lower()
+            axis_routes: list[str] = []
+            if axis == "fidelity":
+                plan["regen_script"] = True
+                axis_routes.append("regen_script (cascades)")
+            elif axis == "color":
+                plan["regen_lookbook"] = True
+                axis_routes.append("regen_lookbook (cascades refs+frames+clips)")
+            elif axis == "cinematography":
+                plan["regen_storyboard"] = True
+                plan["regen_frames"] = "all"
+                plan["regen_clips"]  = "all"
+                plan["regen_edl"]    = True
+                axis_routes.append("regen_storyboard (+ frames/clips/edl)")
+            elif axis == "continuity":
+                plan["regen_storyboard"] = True
+                plan["regen_frames"] = "all"
+                plan["regen_clips"]  = "all"
+                axis_routes.append("regen_storyboard (+ frames/clips for continuity)")
+            elif axis == "acting":
+                # Re-render takes with the (now-updated) prompt direction.
+                plan["regen_clips"] = "all"
+                axis_routes.append("regen_clips (acting → new takes)")
+            elif axis == "sound":
+                plan["regen_music"]     = "all"
+                plan["regen_narration"] = "all"
+                axis_routes.append("regen_music + regen_narration")
+            else:
+                # Critic gave no axis or a novel one — last-resort default
+                # is regen_lookbook, the most "atmospheric" surface that
+                # cascades enough to produce a meaningfully different cut.
+                plan["regen_lookbook"] = True
+                axis_routes.append(f"regen_lookbook (no-axis fallback)")
+            plan["applied_changes"].append({
+                "change":    change,
+                "triggered": axis_routes,
+                "via":       "axis_fallback",
+            })
 
     # Cascade rules — keep in sync with Experiment.new_iteration:
     #   regen_script    → cascades everything
@@ -357,7 +403,10 @@ def plan_summary(plan: dict[str, Any]) -> str:
     if plan["regen_edl"]:
         bits.append("edl")
     if not bits:
-        return "no regen needed (all changes manual_review)"
+        # Every change was below the priority threshold and got
+        # skipped — nothing left to regenerate. The next iteration
+        # will produce the same artifacts as the parent.
+        return "no regen needed (all changes below threshold)"
     return ", ".join(bits)
 
 

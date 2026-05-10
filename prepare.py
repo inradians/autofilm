@@ -1062,6 +1062,20 @@ class Experiment:
         (root / "carryover.json").write_text(
             json.dumps(carryover, indent=2, ensure_ascii=False)
         )
+        # Stash the parent's metric.json so the child's stages can read
+        # the critic feedback when regenerating. parse_script in
+        # particular needs this — when regen_script fires, re-parsing
+        # the same book PDF without the critic's notes produces nearly
+        # identical output; the autoresearch loop has no signal to act
+        # on. With parent_metric.json available, parse_script can fold
+        # the script-relevant suggestions into its system prompt so the
+        # new pass actually responds to what the reviewer flagged.
+        prev_metric = prev_exp.root / "metric.json"
+        if prev_metric.exists():
+            try:
+                (root / "parent_metric.json").write_text(prev_metric.read_text())
+            except Exception:
+                pass
         # Inherit the parent's run_config.json so the UI dropdown shows
         # consistent defaults across the whole iteration chain.
         prev_rc = prev_exp.root / "run_config.json"
@@ -1074,7 +1088,7 @@ class Experiment:
         # Top-level files we never copy forward (rebuilt by next exp).
         skip_files: set[str] = {
             "produce.py", "book.txt", "seed.txt", "parent_exp.txt",
-            "carryover.json", "run_config.json",
+            "carryover.json", "run_config.json", "parent_metric.json",
             "final.mp4", "final_pregrade.mp4",
             "metric.json", "critique.md", "bible.pdf",
             "production_bible.json", "prompts.json",

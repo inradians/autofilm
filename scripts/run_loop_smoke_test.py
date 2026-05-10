@@ -511,10 +511,12 @@ def t_carryover_priority_low_threshold() -> None:
     assert plan["regen_music"] == "all"
 
 
-@test("carryover: vague change goes to manual_review")
-def t_carryover_manual_review() -> None:
+@test("carryover: vague change routed via axis fallback (no manual_review)")
+def t_carryover_axis_fallback() -> None:
     from carryover import plan_carryover
 
+    # 'acting' axis with vague suggestion text — no keyword match,
+    # but the axis tells us to regen clips.
     metric = _make_metric([{
         "axis": "acting", "priority": "high",
         "target": "overall vibe",
@@ -525,10 +527,35 @@ def t_carryover_manual_review() -> None:
 
     plan = plan_carryover(metric)
 
-    # No keyword matched → routed to manual_review
-    assert len(plan["manual_review"]) == 1
-    assert plan["regen_lookbook"] is False
-    assert plan["regen_clips"] == []
+    # No manual_review — every change auto-applied.
+    assert len(plan["manual_review"]) == 0, \
+        f"expected no manual_review, got {plan['manual_review']}"
+    # acting axis routes to regen_clips
+    assert plan["regen_clips"] == "all", \
+        f"acting axis should regen clips, got {plan['regen_clips']}"
+    # Recorded as axis_fallback in applied_changes
+    via = [c.get("via") for c in plan["applied_changes"]]
+    assert "axis_fallback" in via, \
+        f"applied_changes should record axis_fallback, got via={via}"
+
+
+@test("carryover: vague color change → lookbook via axis fallback")
+def t_carryover_axis_color() -> None:
+    from carryover import plan_carryover
+
+    metric = _make_metric([{
+        "axis": "color", "priority": "high",
+        "target": "general feel",
+        "current_behavior": "off",
+        "suggested_change": "different vibe",
+        "expected_impact":  "?",
+    }])
+    plan = plan_carryover(metric)
+    assert len(plan["manual_review"]) == 0
+    assert plan["regen_lookbook"] is True
+    # Lookbook cascade
+    assert plan["regen_frames"] == "all"
+    assert plan["regen_clips"]  == "all"
 
 
 @test("carryover: narration change recognized")
@@ -812,7 +839,8 @@ ALL_TESTS = [
     t_carryover_music_narrow,
     t_carryover_priority_filter,
     t_carryover_priority_low_threshold,
-    t_carryover_manual_review,
+    t_carryover_axis_fallback,
+    t_carryover_axis_color,
     t_carryover_narration,
     t_iter_empty_plan,
     t_iter_lookbook_cascade,
