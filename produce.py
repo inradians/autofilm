@@ -2222,6 +2222,11 @@ def veo_prompt(lookbook: dict, shot: dict, scene: dict,
     #      in build_narration() — the video stage must keep mouths
     #      shut on this shot or the cut will look like everyone is
     #      mouthing the narrator's words.
+    #
+    # Wording is kept terse — Runway's promptText caps at 1000 chars,
+    # and longer combinations of lookbook keywords + multiple
+    # characters + long dialogue can overrun. _truncate_runway_prompt
+    # in prepare.veo() is a defensive backstop; this is the first line.
     dialogue_block = ""
     excerpt = (shot.get("dialogue_excerpt") or "").strip()
     if excerpt:
@@ -2229,22 +2234,11 @@ def veo_prompt(lookbook: dict, shot: dict, scene: dict,
         speaker_id = shot.get("speaker_id") or ""
 
         if is_narration or speaker_id == "narrator":
-            # Narrator is OFF-SCREEN. Tell Veo this is V.O. and
-            # instruct it explicitly NOT to lip-sync the line on
-            # any visible character. The narration audio comes from
-            # ElevenLabs in build_narration() and is mixed at compile
-            # time — the video here should be clean visuals only.
             dialogue_block = (
-                f"VOICE-OVER (narrator unseen — DO NOT lip-sync "
-                f"this line on any visible character; characters "
-                f"on screen continue their action silently): "
-                f'"{excerpt}"\n'
+                f'VO (unseen narrator — no character lip-syncs): "{excerpt}"\n'
             )
         else:
             # Resolve speaker by id from the shot's character list.
-            # Falls back to first character only if no speaker_id was
-            # set (legacy storyboards) — and emits a fallback note so
-            # downstream debugging can spot the schema gap.
             speaker = None
             for c in chars_in_shot:
                 if c.get("id") == speaker_id or c.get("character_id") == speaker_id:
@@ -2252,15 +2246,9 @@ def veo_prompt(lookbook: dict, shot: dict, scene: dict,
                     break
             if speaker is None:
                 speaker = chars_in_shot[0]["name"] if chars_in_shot else "the character"
-            # Voice direction comes from the character's archetype, not
-            # from any real actor's voice. We omit the explicit "in X's
-            # voice" because the model would otherwise try to mimic a
-            # real person.
             dialogue_block = (
-                f"DIALOGUE (synchronized native audio): "
-                f"ONLY {speaker} speaks and lip-syncs this line; "
-                f"all other characters on screen remain silent and "
-                f"do not move their mouths. {speaker}: \"{excerpt}\"\n"
+                f"DIALOGUE (sync audio): ONLY {speaker} lip-syncs; "
+                f'others silent. {speaker}: "{excerpt}"\n'
             )
 
     take_var = TAKE_VARIATIONS[take_index] if take_index < len(TAKE_VARIATIONS) else ""
@@ -2271,10 +2259,9 @@ def veo_prompt(lookbook: dict, shot: dict, scene: dict,
         f"{char_block}"
         f"ACTION: {shot['action']}\n"
         f"{dialogue_block}"
-        f"AMBIENT: {scene.get('mood', '')} mood, {scene['location']}, "
+        f"AMBIENT: {scene.get('mood', '')}, {scene['location']}, "
         f"{scene.get('time_of_day', 'day')}.\n"
-        f"AUDIO: Natural ambient sound and dialogue only. "
-        f"NO background music. NO score. NO soundtrack. NO musical instruments.\n"
+        f"AUDIO: natural ambient + dialogue only; no music.\n"
         f"{take_var}\n"
         f"24fps, anamorphic, fine grain."
     )

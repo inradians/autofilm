@@ -1658,6 +1658,34 @@ def seedance(
     return httpx.get(task.output[0], timeout=300.0).content
 
 
+# Runway's image_to_video endpoint hard-caps promptText at 1000 characters.
+# Setting a slightly lower ceiling here gives breathing room for any
+# trailing edge case (URL-encoding artifacts in transport, etc.).
+RUNWAY_PROMPT_MAX = 950
+
+
+def _truncate_runway_prompt(prompt: str, max_chars: int = RUNWAY_PROMPT_MAX) -> str:
+    """Cap a prompt at Runway's promptText limit.
+
+    Used as a defensive backstop: veo_prompt is already trimmed to stay
+    under this most of the time, but worst-case combinations (long
+    lookbook keyword lists × many characters × long dialogue) can still
+    overrun. Truncating at a line break when possible keeps the cut
+    clean — losing the AUDIO/closing-style block is much better than
+    losing the middle of an instruction.
+    """
+    if len(prompt) <= max_chars:
+        return prompt
+    # Truncate to the budget, then back up to the last newline so we
+    # don't slice mid-instruction. If no newline is available in the
+    # budget, fall through to a hard cut.
+    trimmed = prompt[:max_chars]
+    last_nl = trimmed.rfind("\n")
+    if last_nl > max_chars * 0.6:   # at least 60% of budget retained
+        trimmed = trimmed[:last_nl]
+    return trimmed
+
+
 def veo(
     prompt: str,
     first_frame: bytes,
@@ -1685,7 +1713,7 @@ def veo(
 
     kwargs: dict[str, Any] = {
         "model": target_model,
-        "prompt_text": prompt,
+        "prompt_text": _truncate_runway_prompt(prompt),
         "prompt_image": _data_uri(first_frame),
         "ratio": ratio,
         "duration": duration,
