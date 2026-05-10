@@ -511,6 +511,27 @@ def api_start() -> Any:
     director         = (request.form.get("director") or "").strip()
     cinematographer  = (request.form.get("cinematographer") or "").strip()
 
+    # max_scenes — caps how many scenes the pipeline renders. Surfaced
+    # because it's the strongest cost lever (each scene multiplies
+    # image+video render cost). Mirrors the MAX_SCENES env var.
+    try:
+        max_scenes = int(request.form.get("max_scenes", "3"))
+        max_scenes = max(1, min(max_scenes, 50))
+    except (TypeError, ValueError):
+        max_scenes = 3
+
+    # seed — optional. Blank ⇒ pipeline picks one fresh per Experiment.
+    # Surfaced for reproducibility (re-running with the same seed should
+    # produce comparable takes). Stored as a string; the pipeline parses
+    # int(SEED) if present.
+    seed_raw = (request.form.get("seed") or "").strip()
+    seed: int | None = None
+    if seed_raw:
+        try:
+            seed = int(seed_raw)
+        except ValueError:
+            return jsonify({"error": f"seed must be an integer (got {seed_raw!r})"}), 400
+
     # ── Save uploaded moodboards per-book ──
     book_slug   = _safe_book_slug(book_path)
     user_mb_dir = EXPERIMENTS_DIR / book_slug / "user_moodboards"
@@ -536,6 +557,8 @@ def api_start() -> Any:
         "threshold":         threshold,
         "director":          director,
         "cinematographer":   cinematographer,
+        "max_scenes":        max_scenes,
+        "seed":              seed,
         "moodboards_saved":  saved_moodboards,
         "started_at":        time.time(),
     }
@@ -554,11 +577,14 @@ def api_start() -> Any:
     env: dict[str, str] = {
         "BOOK_PDF_PATH":              str(book_path),
         "AUTOFILM_PENDING_RUN_CONFIG": str(pending_path),
+        "MAX_SCENES":                 str(max_scenes),
     }
     if director:
         env["DIRECTOR"] = director
     if cinematographer:
         env["CINEMATOGRAPHER"] = cinematographer
+    if seed is not None:
+        env["SEED"] = str(seed)
 
     run_state.config = config
     _spawn_subprocess(run_state, cmd, env=env)

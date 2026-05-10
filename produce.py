@@ -776,6 +776,25 @@ def _rephrase_prompt(original: str) -> str:
 # Reference images and moodboards are passed to every model that accepts
 # them so visual consistency is preserved across shots regardless of which
 # model ends up generating the clip or frame.
+#
+# Each cascade publishes the LABEL of the model that ultimately succeeded
+# via this thread-local. Callers read it AFTER a successful return to
+# attribute the artifact for log_prompt() / cost tracking / UI badges. We
+# use a thread-local rather than a tuple return value to avoid touching
+# every caller across the codebase.
+
+_last_chain_model = threading.local()
+
+def _publish_chain_model(label: str) -> None:
+    """Record which model just succeeded for the current thread.
+    Callers read it via last_chain_model() to log_prompt with accurate
+    model attribution."""
+    _last_chain_model.value = label
+
+def last_chain_model() -> str:
+    """Return the model label most recently published by a successful
+    cascade call ON THIS THREAD. Empty string if nothing yet."""
+    return getattr(_last_chain_model, "value", "")
 
 def _generate_video(
     prompt: str,
@@ -854,6 +873,7 @@ def _generate_video(
             _tprint(f"    [{label}] video {context}")
             result = fn()
             _tprint(f"    ✓ [{label}] {context} ({len(result)//1024}kB)")
+            _publish_chain_model(label)
             return result
         except Exception as e:  # noqa: BLE001
             if _is_daily_limit(e):
@@ -965,6 +985,7 @@ def _generate_image_t2i(
             _tprint(f"    [{label}] t2i {context}")
             result = fn()
             _tprint(f"    ✓ [{label}] {context} ({len(result)//1024}kB)")
+            _publish_chain_model(label)
             return result
         except Exception as e:  # noqa: BLE001
             if _is_daily_limit(e):
@@ -1067,6 +1088,7 @@ def _generate_image_with_refs(
             _tprint(f"    [{label}] image+refs {context}")
             result = fn()
             _tprint(f"    ✓ [{label}] {context} ({len(result)//1024}kB)")
+            _publish_chain_model(label)
             return result
         except Exception as e:  # noqa: BLE001
             if _is_daily_limit(e):
@@ -2059,6 +2081,7 @@ def build_first_frames(exp: Experiment, script: dict, cast: list[dict],
                 quality="high",
                 context=f"frame {scene_id}/{shot_id}",
             )
+            composition_model = last_chain_model() or "auto"
         except RuntimeError as e:
             _tprint(f"  ⚠ All image models failed for {scene_id}/{shot_id}: {e}")
 
@@ -2096,13 +2119,28 @@ def build_first_frames(exp: Experiment, script: dict, cast: list[dict],
                     quality="standard",
                     context=f"frame_lock {scene_id}/{shot_id}",
                 )
+                final_model = last_chain_model() or "unknown"
             except RuntimeError as e:
                 _tprint(f"    ⚠ Lock failed for {scene_id}/{shot_id}: {e}  (using composition)")
                 final = composition
+                final_model = composition_model
         else:
             final = composition
+            final_model = composition_model
 
         out_path.write_bytes(final)
+        # Log the on-disk artifact with the model that actually produced
+        # it. This is the key the UI uses for the colored model border;
+        # without it, first-frame thumbs render unstyled because the
+        # bible's frames.by_scene_shot[k] resolves to the .png path but
+        # prompts.json only had an entry under .composition.png.
+        exp.log_prompt(
+            target=f"frames/{scene_id}/{shot_id}.png",
+            model=final_model,
+            prompt=nano_prompt if all_refs else ff_prompt,
+            stage="first_frame",
+            scene=scene_id, shot=shot_id,
+        )
         return scene_id, shot_id, str(out_path)
 
     _n_ff = _workers_for('first_frame')

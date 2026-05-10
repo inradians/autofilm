@@ -176,6 +176,64 @@
 
   hr.div { border: 0; border-top: 1px solid var(--border); margin: 18px 0; }
 
+  /* Lightbox — click any thumb/video to view it full-size for analysis.
+     Centers the media, dims the rest of the page, ESC or backdrop-
+     click to close. Designed to be visually unobtrusive so the user
+     remembers it's a temporary inspection overlay, not a full route. */
+  .lightbox {
+    position: fixed; inset: 0;
+    background: rgba(8, 9, 12, 0.92);
+    display: none; align-items: center; justify-content: center;
+    z-index: 1000; cursor: zoom-out;
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+  }
+  .lightbox.open { display: flex; }
+  .lightbox-content {
+    max-width: 92vw; max-height: 88vh;
+    position: relative;
+    cursor: default;
+    display: flex; flex-direction: column;
+    background: #0a0b0e;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .lightbox-content > img,
+  .lightbox-content > video {
+    max-width: 92vw; max-height: 80vh;
+    object-fit: contain; background: #000;
+    display: block;
+  }
+  .lightbox-caption {
+    padding: 10px 14px;
+    border-top: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 14px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 11px; color: var(--muted);
+  }
+  .lightbox-caption .path { color: var(--ink); word-break: break-all; }
+  .lightbox-caption .model-tag {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 2px 8px; border-radius: 3px;
+    background: var(--lb-color, var(--panel2));
+    color: #0a0b0e; font-weight: 600;
+  }
+  .lightbox-close {
+    position: absolute; top: 8px; right: 8px;
+    background: rgba(0, 0, 0, 0.6); color: #c2c6cf;
+    border: 1px solid var(--border); border-radius: 3px;
+    width: 28px; height: 28px;
+    font-size: 16px; line-height: 1; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .lightbox-close:hover { color: #fff; border-color: var(--ink); }
+
+  /* Make every thumb a pointer + show 'this is clickable' on hover */
+  .thumb { cursor: zoom-in; }
+  .thumb:hover { outline: 1px solid var(--ink); outline-offset: 1px; }
+
   /* Main area: experiment focus */
   .empty {
     color: var(--muted); font-style: italic; padding: 60px 20px;
@@ -539,6 +597,25 @@
                value="0.15" min="0" max="1" step="0.01" />
       </div>
 
+      <div class="field-row">
+        <div class="field">
+          <label for="maxScenes">max scenes</label>
+          <!-- Caps how many scenes parse_script keeps. Lower = faster
+               iteration; this is the strongest cost lever. -->
+          <input id="maxScenes" name="max_scenes" type="number"
+                 value="3" min="1" max="50"
+                 title="MAX_SCENES env var. Caps how many scenes the pipeline renders." />
+        </div>
+        <div class="field">
+          <label for="seed">seed</label>
+          <!-- Random seed passed through to image / video generators
+               for reproducible takes. Blank = pipeline picks one. -->
+          <input id="seed" name="seed" type="number"
+                 placeholder="auto"
+                 title="Random seed for reproducibility. Leave blank for a fresh random seed each run." />
+        </div>
+      </div>
+
       <button type="submit" id="startBtn">start run</button>
       <button type="button" id="stopBtn" class="danger" style="display:none">stop</button>
     </form>
@@ -591,6 +668,19 @@
     <div class="empty" id="mainEmpty">No experiments yet — start a run to populate this view.</div>
   </section>
 </main>
+
+<!-- Lightbox overlay — populated by openLightbox(), shown via .open -->
+<div class="lightbox" id="lightbox" role="dialog" aria-modal="true" hidden>
+  <div class="lightbox-content" id="lightboxContent">
+    <button type="button" class="lightbox-close" id="lightboxClose"
+            aria-label="Close">×</button>
+    <!-- media element (img or video) inserted here at open time -->
+    <div class="lightbox-caption">
+      <span class="path" id="lightboxPath"></span>
+      <span class="model-tag" id="lightboxModelTag" style="display:none"></span>
+    </div>
+  </div>
+</div>
 
 <script>
 const $ = (id) => document.getElementById(id);
@@ -726,6 +816,9 @@ function makeThumb(book_slug, exp_id, relpath, caption, isVideo = false, model =
   if (isVideo) {
     media = document.createElement('video');
     media.muted = true; media.controls = true; media.preload = 'metadata';
+    // Stop click bubbling from native video controls (play/pause/etc.)
+    // to the wrap — otherwise pausing the video opens the lightbox.
+    media.addEventListener('click', (e) => e.stopPropagation());
   } else {
     media = document.createElement('img');
     media.loading = 'lazy';
@@ -744,7 +837,87 @@ function makeThumb(book_slug, exp_id, relpath, caption, isVideo = false, model =
     cap.textContent = caption;
     wrap.appendChild(cap);
   }
+
+  // Click-to-zoom — lightbox opens with the same media, full-size,
+  // for visual inspection (was a recurring user request whenever we
+  // wanted to inspect a freeze-frame or compare two takes).
+  wrap.addEventListener('click', () => {
+    openLightbox({
+      src: media.src,
+      isVideo: isVideo,
+      caption: caption || relpath,
+      model: model,
+    });
+  });
   return wrap;
+}
+
+// ── Lightbox ──────────────────────────────────────────────────────────
+//
+// Click any thumb (image or video) to view it full-size in an overlay.
+// ESC or click-outside closes. Used for analyzing details that thumb-
+// sized media obscures — frozen frames, lip-sync issues, color drift.
+
+function openLightbox({ src, isVideo, caption, model }) {
+  const lb      = $('lightbox');
+  const content = $('lightboxContent');
+  const pathEl  = $('lightboxPath');
+  const tag     = $('lightboxModelTag');
+
+  // Remove the previous media element if any (keep the close button
+  // and caption row; both have stable IDs).
+  const prev = content.querySelector('img, video');
+  if (prev) prev.remove();
+
+  // Build the new media element. <video> inherits autoplay etc. from
+  // user interaction; we don't autoplay so it doesn't surprise the
+  // user with sound when they were just inspecting visuals.
+  let media;
+  if (isVideo) {
+    media = document.createElement('video');
+    media.controls = true; media.preload = 'metadata';
+  } else {
+    media = document.createElement('img');
+  }
+  media.src = src;
+  // Insert at the top of .lightbox-content, above the caption row.
+  content.insertBefore(media, content.querySelector('.lightbox-caption'));
+
+  pathEl.textContent = caption;
+  if (model) {
+    tag.style.display = '';
+    tag.textContent = model;
+    tag.style.setProperty('--lb-color', _modelColor(model));
+  } else {
+    tag.style.display = 'none';
+  }
+
+  lb.hidden = false;
+  lb.classList.add('open');
+}
+
+function closeLightbox() {
+  const lb = $('lightbox');
+  if (!lb || !lb.classList.contains('open')) return;
+  // Pause any playing video before hiding, so audio doesn't keep going.
+  const v = lb.querySelector('video');
+  if (v) { try { v.pause(); } catch {} }
+  lb.classList.remove('open');
+  lb.hidden = true;
+}
+
+function _initLightboxControls() {
+  const lb = $('lightbox');
+  if (!lb) return;
+  // Click backdrop closes; click on inner content does NOT (it would
+  // close even when the user is interacting with video controls).
+  lb.addEventListener('click', (e) => {
+    if (e.target === lb) closeLightbox();
+  });
+  $('lightboxClose').addEventListener('click', closeLightbox);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeLightbox();
+  });
 }
 
 function makeStageSection(title, count = null, open = false) {
@@ -1372,6 +1545,11 @@ function applyDefaultsFromConfig(rc) {
   if (rc.iterations)       $('iterations').value      = rc.iterations;
   if (rc.target_loss)      $('targetLoss').value      = rc.target_loss;
   if (rc.threshold)        $('threshold').value       = rc.threshold;
+  if (rc.max_scenes)       $('maxScenes').value       = rc.max_scenes;
+  // Seed is intentionally NOT rehydrated: re-running with the same seed
+  // each time would defeat the variation we expect across runs. Leave
+  // it blank so the pipeline picks a fresh one unless the user types
+  // one in deliberately.
 }
 
 // ── Drag-drop PDF zone ──────────────────────────────────────
@@ -1587,6 +1765,7 @@ $('smokeBtn').addEventListener('click', async () => {
 });
 
 setupDropzone();
+_initLightboxControls();
 poll();
 setInterval(poll, 3000);
 </script>
