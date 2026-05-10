@@ -371,7 +371,60 @@
     font-family: ui-monospace, "SF Mono", Menlo, monospace;
     pointer-events: none;
   }
+  .thumb.has-model {
+    border-width: 2px;   /* CSS var --model-color set inline per thumb */
+    border-color: var(--model-color, var(--border));
+  }
+  .thumb .model-badge {
+    position: absolute; top: 4px; left: 4px;
+    background: var(--model-color, #444);
+    color: #0a0b0e;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 9px; font-weight: 600; letter-spacing: 0.02em;
+    padding: 1px 6px; border-radius: 2px;
+    pointer-events: none;
+    max-width: calc(100% - 8px);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .audio-card.has-model {
+    border-left: 3px solid var(--model-color, var(--border));
+  }
+  .audio-card .model-badge {
+    background: var(--model-color, #444);
+    color: #0a0b0e;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 9px; font-weight: 600;
+    padding: 1px 6px; border-radius: 2px;
+    margin-left: 8px;
+    display: inline-block;
+  }
   .final-mp4 { aspect-ratio: 16 / 9; max-width: 720px; }
+
+  /* Models legend — shown above the stage sections, listing every
+     model that produced an artifact in this experiment with its
+     color swatch. */
+  .models-legend {
+    display: flex; flex-wrap: wrap; gap: 6px;
+    margin: 14px 0; padding: 10px 12px;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 4px;
+  }
+  .models-legend .legend-title {
+    font-size: 10px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--muted);
+    align-self: center; margin-right: 6px;
+  }
+  .models-legend .swatch {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-family: ui-monospace, monospace; font-size: 10.5px;
+    padding: 3px 7px; border-radius: 3px;
+    background: var(--panel2); border: 1px solid var(--border);
+    color: var(--ink);
+  }
+  .models-legend .swatch::before {
+    content: ""; width: 9px; height: 9px; border-radius: 50%;
+    background: var(--swatch-color);
+  }
 
   .pill {
     display: inline-block; padding: 1px 6px; border-radius: 10px;
@@ -620,9 +673,100 @@ function artifactURL(book_slug, exp_id, relpath) {
   return `/api/artifact/${encodeURIComponent(book_slug)}/${encodeURIComponent(exp_id)}/${relpath}`;
 }
 
-function makeThumb(book_slug, exp_id, relpath, caption, isVideo = false) {
+// ── Model color attribution ──────────────────────────────────────
+//
+// Each artifact in an experiment is created by a specific model
+// (gen4_image, nano_banana, veo, ltx-2-3-pro, eleven_multilingual_v2,
+// stable_audio, ...). The pipeline frequently falls back across models
+// in the same run — e.g. a Veo failure cascades to LTX, a Gen4 fail
+// cascades to nano_banana — so a particular shot may end up rendered
+// by a different model than the storyboard assumed. Showing the model
+// attribution per thumb, color-coded, makes that drift visible at a
+// glance without having to dig through prompts.json.
+//
+// Color is a deterministic hash of the model FAMILY (gen4 / nano /
+// veo / ltx / etc) so all variants of one family share a hue. We hash
+// to HSL with fixed saturation/lightness so colors are distinct but
+// readable on the dark background.
+function _modelFamily(model) {
+  if (!model) return '';
+  // Strip suffixes that are user-irrelevant: '+refs', 'core', 'sd3', etc.
+  let m = String(model).toLowerCase()
+    .replace(/\+refs$/, '')
+    .replace(/_(core|sd3|ultra|preview|fast|turbo|pro|2-3)\b/g, '')
+    .replace(/-/g, '_');
+  // Family roots — first underscored token captures the lineage.
+  const root = m.split('_')[0];
+  return root || m;
+}
+function _modelColor(model) {
+  const fam = _modelFamily(model);
+  if (!fam) return '#666';
+  // FNV-1a 32-bit hash for stable hue assignment.
+  let h = 2166136261;
+  for (let i = 0; i < fam.length; i++) {
+    h ^= fam.charCodeAt(i);
+    h = (h * 16777619) >>> 0;
+  }
+  const hue = h % 360;
+  return `hsl(${hue}, 65%, 60%)`;
+}
+
+// Truncated label for the badge (the full name goes in the title attr).
+function _modelLabel(model) {
+  if (!model) return '';
+  const m = String(model);
+  // Common cleanup so the badge reads naturally:
+  return m
+    .replace('_image', '')
+    .replace('_audio', '')
+    .replace(/^stable_/, 'stab.')
+    .replace(/^eleven_/, 'eleven.')
+    .replace(/^google_/, 'g.')
+    .replace(/_preview$/, '')
+    .replace(/_v\d+$/, '')
+    .slice(0, 24);
+}
+
+// Build a legend listing every distinct model that produced an
+// artifact in this experiment, with its color swatch. Returns null
+// if there's nothing to show (e.g. fresh experiment with no
+// prompts.json yet).
+function _buildModelsLegend(modelsByTarget) {
+  const seen = new Set();
+  for (const m of Object.values(modelsByTarget || {})) {
+    if (m) seen.add(m);
+  }
+  if (!seen.size) return null;
+
+  const legend = document.createElement('div');
+  legend.className = 'models-legend';
+  const title = document.createElement('span');
+  title.className = 'legend-title';
+  title.textContent = 'models';
+  legend.appendChild(title);
+
+  // Sort alphabetically so the legend has a stable order across reloads.
+  const sorted = [...seen].sort();
+  for (const m of sorted) {
+    const sw = document.createElement('span');
+    sw.className = 'swatch';
+    sw.style.setProperty('--swatch-color', _modelColor(m));
+    sw.textContent = m;
+    sw.title = `family: ${_modelFamily(m)}`;
+    legend.appendChild(sw);
+  }
+  return legend;
+}
+
+function makeThumb(book_slug, exp_id, relpath, caption, isVideo = false, model = '') {
   const wrap = document.createElement('div');
   wrap.className = 'thumb';
+  if (model) {
+    wrap.classList.add('has-model');
+    wrap.style.setProperty('--model-color', _modelColor(model));
+    wrap.title = `model: ${model}`;
+  }
   let media;
   if (isVideo) {
     media = document.createElement('video');
@@ -633,6 +777,12 @@ function makeThumb(book_slug, exp_id, relpath, caption, isVideo = false) {
   }
   media.src = artifactURL(book_slug, exp_id, relpath);
   wrap.appendChild(media);
+  if (model) {
+    const badge = document.createElement('div');
+    badge.className = 'model-badge';
+    badge.textContent = _modelLabel(model);
+    wrap.appendChild(badge);
+  }
   if (caption) {
     const cap = document.createElement('div');
     cap.className = 'cap';
@@ -740,14 +890,25 @@ async function drawWaveform(canvas, url) {
   }
 }
 
-function makeAudioCard(book_slug, exp_id, relpath, name) {
+function makeAudioCard(book_slug, exp_id, relpath, name, model = '') {
   const url = artifactURL(book_slug, exp_id, relpath);
   const card = document.createElement('div');
   card.className = 'audio-card';
+  if (model) {
+    card.classList.add('has-model');
+    card.style.setProperty('--model-color', _modelColor(model));
+    card.title = `model: ${model}`;
+  }
 
   const nameEl = document.createElement('div');
   nameEl.className = 'name';
   nameEl.textContent = name;
+  if (model) {
+    const badge = document.createElement('span');
+    badge.className = 'model-badge';
+    badge.textContent = _modelLabel(model);
+    nameEl.appendChild(badge);
+  }
   card.appendChild(nameEl);
 
   const canvas = document.createElement('canvas');
@@ -927,13 +1088,22 @@ function renderExperimentDetail(data, isLive = false) {
   const st = data.bible.stages;
   const slug = data.book_slug;
   const eid  = data.exp_id;
+  const mdl  = data.models_by_target || {};
+  const M = (relpath) => mdl[relpath] || '';
+
+  // Models legend — built from every model that produced a visible
+  // artifact in this experiment. Lives above the stage sections so
+  // the user can map badge → model name without hovering each thumb.
+  const legend = _buildModelsLegend(mdl);
+  if (legend) container.appendChild(legend);
 
   // Lookbook style frame — open by default (it's the master reference)
   if (st.lookbook && st.lookbook.style_frame) {
+    const p = st.lookbook.style_frame;
     const s = makeStageSection('lookbook style frame', 1, true);
     const grid = document.createElement('div');
     grid.className = 'thumbs';
-    grid.appendChild(makeThumb(slug, eid, st.lookbook.style_frame, 'style_frame'));
+    grid.appendChild(makeThumb(slug, eid, p, 'style_frame', false, M(p)));
     s.body.appendChild(grid);
     container.appendChild(s);
   }
@@ -947,7 +1117,7 @@ function renderExperimentDetail(data, isLive = false) {
       const grid = document.createElement('div');
       grid.className = 'thumbs';
       for (const k of keys.slice(0, 24))
-        grid.appendChild(makeThumb(slug, eid, refs[k], k));
+        grid.appendChild(makeThumb(slug, eid, refs[k], k, false, M(refs[k])));
       s.body.appendChild(grid);
       container.appendChild(s);
     }
@@ -962,7 +1132,7 @@ function renderExperimentDetail(data, isLive = false) {
       const grid = document.createElement('div');
       grid.className = 'thumbs';
       for (const k of keys)
-        grid.appendChild(makeThumb(slug, eid, mbs[k], k));
+        grid.appendChild(makeThumb(slug, eid, mbs[k], k, false, M(mbs[k])));
       s.body.appendChild(grid);
       container.appendChild(s);
     }
@@ -977,7 +1147,7 @@ function renderExperimentDetail(data, isLive = false) {
       const wrap = document.createElement('div');
       wrap.className = 'audio-row';
       for (const k of keys)
-        wrap.appendChild(makeAudioCard(slug, eid, m[k], k));
+        wrap.appendChild(makeAudioCard(slug, eid, m[k], k, M(m[k])));
       s.body.appendChild(wrap);
       container.appendChild(s);
     }
@@ -992,7 +1162,7 @@ function renderExperimentDetail(data, isLive = false) {
       const wrap = document.createElement('div');
       wrap.className = 'audio-row';
       for (const k of keys)
-        wrap.appendChild(makeAudioCard(slug, eid, n[k], k));
+        wrap.appendChild(makeAudioCard(slug, eid, n[k], k, M(n[k])));
       s.body.appendChild(wrap);
       container.appendChild(s);
     }
@@ -1007,7 +1177,7 @@ function renderExperimentDetail(data, isLive = false) {
       const grid = document.createElement('div');
       grid.className = 'thumbs';
       for (const k of keys.slice(0, 48))
-        grid.appendChild(makeThumb(slug, eid, fr[k], k));
+        grid.appendChild(makeThumb(slug, eid, fr[k], k, false, M(fr[k])));
       s.body.appendChild(grid);
       container.appendChild(s);
     }
@@ -1022,7 +1192,7 @@ function renderExperimentDetail(data, isLive = false) {
       const grid = document.createElement('div');
       grid.className = 'thumbs video';
       for (const k of keys.slice(0, 24))
-        grid.appendChild(makeThumb(slug, eid, cl[k], k, true));
+        grid.appendChild(makeThumb(slug, eid, cl[k], k, true, M(cl[k])));
       s.body.appendChild(grid);
       container.appendChild(s);
     }

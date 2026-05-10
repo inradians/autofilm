@@ -422,6 +422,23 @@ def api_experiment(book_slug: str, exp_id: str) -> Any:
     except Exception as e:  # noqa: BLE001
         out["cost_error"] = str(e)
 
+    # Model-by-target map (target relpath → model name). Read from
+    # prompts.json which log_prompt() upserts during the run. The
+    # frontend uses this to show a colored border + label per thumb so
+    # it's obvious which model rendered each artifact (Veo vs LTX
+    # fallback for video, gen4_image vs nano_banana for stills, etc).
+    try:
+        prompts_path = exp_root / "prompts.json"
+        if prompts_path.exists():
+            log = json.loads(prompts_path.read_text())
+            out["models_by_target"] = {
+                target: entry.get("model", "")
+                for target, entry in log.items()
+                if isinstance(entry, dict)
+            }
+    except Exception:                                              # noqa: BLE001
+        out["models_by_target"] = {}
+
     return jsonify(out)
 
 
