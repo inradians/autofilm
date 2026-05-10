@@ -194,10 +194,19 @@ def build_production_bible_dict(exp: Experiment) -> dict[str, Any]:
     if exp.has("storyboard.json"):
         storyboard = exp.read_json("storyboard.json")
         n_shots = sum(len(v) for v in storyboard.values())
+        # Per-scene + total duration in seconds, summed from each shot's
+        # duration_seconds field (the storyboard schema's source of
+        # truth for shot length, used by the video router).
+        seconds_by_scene = {
+            sid: sum(int(s.get("duration_seconds", 0)) for s in shots)
+            for sid, shots in storyboard.items()
+        }
         bible["stages"]["storyboard"] = {
-            "path":          "storyboard.json",
-            "n_shots":       n_shots,
-            "shots_by_scene": {sid: len(v) for sid, v in storyboard.items()},
+            "path":             "storyboard.json",
+            "n_shots":          n_shots,
+            "shots_by_scene":   {sid: len(v) for sid, v in storyboard.items()},
+            "seconds_by_scene": seconds_by_scene,
+            "total_seconds":    sum(seconds_by_scene.values()),
         }
 
     # ── Stage 6: music ─────────────────────────────────────────────────

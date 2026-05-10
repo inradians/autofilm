@@ -316,7 +316,11 @@ def _build_filter_complex(
     # Step 1 — normalize every input stream to identical (width, height,
     # fps, sar). xfade requires this; otherwise it errors. For inputs
     # lacking an audio track, synthesize silence at the matching duration
-    # via anullsrc so [a{i}] is always defined.
+    # via anullsrc so [a{i}] is always defined. For inputs WITH audio,
+    # explicitly trim+pad to match the video stream duration so the
+    # xfade (video) and acrossfade (audio) chains stay synchronized —
+    # otherwise audio that runs longer than its video drifts the
+    # cross-fade timing across each subsequent transition.
     for i in range(n):
         parts.append(
             f"[{i}:v]scale={width}:{height}:force_original_aspect_ratio=decrease,"
@@ -325,7 +329,9 @@ def _build_filter_complex(
         )
         if has_audio[i]:
             parts.append(
-                f"[{i}:a]aformat=sample_fmts=fltp:channel_layouts=stereo:sample_rates=48000,"
+                f"[{i}:a]atrim=0:{durations[i]:.4f},"
+                f"apad=whole_dur={durations[i]:.4f},"
+                f"aformat=sample_fmts=fltp:channel_layouts=stereo:sample_rates=48000,"
                 f"asetpts=PTS-STARTPTS[a{i}]"
             )
         else:
@@ -447,8 +453,18 @@ def render_clips_with_transitions(
             fps=fps, width=width, height=height, bitrate=bitrate,
         )
 
-    # Probe each clip's duration. Required for xfade offset math.
-    durations = [_ffprobe_duration(Path(p)) for p in clip_paths]
+    # Probe each clip's VIDEO STREAM duration. If we used container
+    # duration here (max of audio/video), a clip with 6.5s of audio
+    # over 6.0s of video would tell xfade it has 6.5s of video — and
+    # the fade offset would land past the real video end, so ffmpeg
+    # pads the gap with frozen frames before the next clip starts.
+    # That's the dominant source of "frozen frames" in compiled scenes.
+    # Fall back to container duration if the video stream doesn't
+    # report its own duration (rare, but possible with some encoders).
+    durations = []
+    for p in clip_paths:
+        v = _ffprobe_video_stream_duration(Path(p))
+        durations.append(v if v else _ffprobe_duration(Path(p)))
     # Also probe whether each clip has an audio stream — some video
     # backends (LTX fallbacks) produce silent video. Without this, the
     # filter graph references [{i}:a] for audio-less inputs and the

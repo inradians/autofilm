@@ -2678,6 +2678,20 @@ def compile_final(exp: Experiment, script: dict, storyboard: dict,
             shot_clips = []
             for d, src in zip(ordered_decisions, ordered_paths):
                 c = VideoFileClip(str(src))
+                # Same drift fix as the assembled-scene path: a take
+                # whose container duration is longer than its actual
+                # video stream (e.g., 6.5s audio over 6.0s video) makes
+                # moviepy concatenate read frames past the real video
+                # end and pad with the last valid frame — visible as a
+                # frozen tail on every shot in cuts-only scenes. Trim
+                # to video-stream duration when there's a real gap.
+                try:
+                    from transitions import _ffprobe_video_stream_duration
+                    v_only = _ffprobe_video_stream_duration(Path(src))
+                    if v_only and 0 < c.duration - v_only <= 5.0:
+                        c = _subclip(c, 0, v_only)
+                except Exception:                                  # noqa: BLE001
+                    pass
                 in_s = d.get("in_seconds") or 0.0
                 out_s = d.get("out_seconds")
                 if out_s and out_s > in_s:

@@ -361,6 +361,59 @@
     font-family: ui-monospace, monospace;
   }
 
+  /* Script + storyboard summary card. Lives above the cost card so
+     the user can see what the pipeline parsed at a glance: title,
+     scene count, cast size, locations, shot total, total runtime —
+     and a small per-scene breakdown of (shot count × duration). */
+  .summary {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 6px; padding: 14px 18px; margin: 18px 0;
+  }
+  .summary .title-row {
+    display: flex; align-items: baseline; justify-content: space-between;
+    margin-bottom: 12px; gap: 12px;
+  }
+  .summary .title-row .title {
+    font-size: 15px; font-weight: 600; color: var(--ink);
+  }
+  .summary .title-row .source {
+    font-size: 11px; color: var(--muted);
+    font-family: ui-monospace, monospace;
+  }
+  .summary .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+    gap: 8px 18px;
+    border-top: 1px solid var(--border);
+    padding-top: 12px;
+  }
+  .summary .stat .v {
+    font-family: ui-monospace, monospace;
+    font-size: 18px; color: var(--accent); display: block;
+    line-height: 1.2;
+  }
+  .summary .stat .k {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--muted); margin-top: 2px;
+  }
+  .summary .by-scene {
+    margin-top: 14px; border-top: 1px solid var(--border); padding-top: 12px;
+  }
+  .summary .by-scene .lbl {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--muted); margin-bottom: 6px;
+  }
+  .summary .by-scene table {
+    width: 100%; border-collapse: collapse;
+    font-family: ui-monospace, monospace; font-size: 11.5px;
+  }
+  .summary .by-scene td {
+    padding: 3px 0; color: var(--ink);
+  }
+  .summary .by-scene td:nth-child(1) { color: var(--muted); }
+  .summary .by-scene td:nth-child(3),
+  .summary .by-scene td:nth-child(4) { text-align: right; color: var(--muted); }
+
   /* Cost card */
   .cost {
     background: var(--panel); border: 1px solid var(--border);
@@ -837,6 +890,104 @@ function fmtUSD(v) {
   return `$${v.toFixed(4)}`;
 }
 
+function _fmtDuration(seconds) {
+  // 0       → '0:00'
+  // 95      → '1:35'
+  // 4523    → '1:15:23'
+  if (!seconds || seconds <= 0) return '0:00';
+  const s = Math.round(seconds);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+  const mm = String(m).padStart(h ? 2 : 1, '0');
+  const sss = String(ss).padStart(2, '0');
+  return h ? `${h}:${mm}:${sss}` : `${mm}:${sss}`;
+}
+
+function renderSummary(stages) {
+  const sc  = stages.script;
+  const cst = stages.cast;
+  const loc = stages.locations;
+  const sb  = stages.storyboard;
+  // Nothing to show until parse_script ran.
+  if (!sc) return null;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'summary';
+
+  // Title row
+  const titleRow = document.createElement('div');
+  titleRow.className = 'title-row';
+  const titleEl = document.createElement('div');
+  titleEl.className = 'title';
+  titleEl.textContent = sc.title || 'Untitled';
+  titleRow.appendChild(titleEl);
+  // Optional source path / book filename, dimmed
+  if (sc.source) {
+    const src = document.createElement('div');
+    src.className = 'source';
+    src.textContent = sc.source;
+    titleRow.appendChild(src);
+  }
+  wrap.appendChild(titleRow);
+
+  // Stat tiles row. Each tile is value-on-top, label-on-bottom (k/v
+  // semantics — the value reads first because that's the headline).
+  const stats = document.createElement('div');
+  stats.className = 'stats';
+
+  function tile(value, label) {
+    const t = document.createElement('div');
+    t.className = 'stat';
+    const v = document.createElement('div');
+    v.className = 'v';
+    v.textContent = value;
+    const k = document.createElement('div');
+    k.className = 'k';
+    k.textContent = label;
+    t.appendChild(v); t.appendChild(k);
+    return t;
+  }
+
+  stats.appendChild(tile(sc.n_scenes ?? '—', 'scenes'));
+  stats.appendChild(tile(sc.n_characters ?? '—', 'characters'));
+  if (cst) stats.appendChild(tile(cst.n_cast ?? '—', 'cast'));
+  if (loc) stats.appendChild(tile(loc.n_locations ?? '—', 'locations'));
+  if (sb)  stats.appendChild(tile(sb.n_shots ?? '—', 'shots'));
+  if (sb)  stats.appendChild(tile(_fmtDuration(sb.total_seconds), 'runtime'));
+  wrap.appendChild(stats);
+
+  // Per-scene breakdown table — only when storyboard is available.
+  // Shows scene id, shot count, and duration. Doesn't list shot
+  // titles to keep the card compact; the takes section below
+  // shows everything visually.
+  if (sb && sb.shots_by_scene && Object.keys(sb.shots_by_scene).length) {
+    const sec = document.createElement('div');
+    sec.className = 'by-scene';
+    const lbl = document.createElement('div');
+    lbl.className = 'lbl';
+    lbl.textContent = 'shots by scene';
+    sec.appendChild(lbl);
+
+    const tbl = document.createElement('table');
+    const sceneIds = Object.keys(sb.shots_by_scene);
+    for (const sid of sceneIds) {
+      const tr = document.createElement('tr');
+      const shots = sb.shots_by_scene[sid] || 0;
+      const dur = (sb.seconds_by_scene && sb.seconds_by_scene[sid]) || 0;
+      tr.innerHTML =
+        `<td>${sid}</td>` +
+        `<td>${shots} shot${shots === 1 ? '' : 's'}</td>` +
+        `<td>${_fmtDuration(dur)}</td>`;
+      tbl.appendChild(tr);
+    }
+    sec.appendChild(tbl);
+    wrap.appendChild(sec);
+  }
+
+  return wrap;
+}
+
 function renderCost(cost) {
   const wrap = document.createElement('div');
   wrap.className = 'cost';
@@ -970,6 +1121,15 @@ function renderExperimentDetail(data, isLive = false) {
       p.textContent = `regen vs parent: ${flags.join(', ')}`;
       container.appendChild(p);
     }
+  }
+
+  // Script + storyboard summary card. Renders above cost so the user
+  // sees what was parsed at a glance — total scenes/shots/runtime
+  // plus per-scene breakdown. Only shown once script.json exists in
+  // the bible (i.e. after Stage 1 completes).
+  if (data.bible && data.bible.stages) {
+    const summary = renderSummary(data.bible.stages);
+    if (summary) container.appendChild(summary);
   }
 
   // Cost breakdown
