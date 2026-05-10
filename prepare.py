@@ -560,8 +560,12 @@ VIDEO_MODELS = {
         "max_resolution":   "1080p",
         "native_audio":     False,           # Runway adds audio via TTS/SFX layer
         "cost_per_sec":     0.12,
-        "use_for":          "identity_lock",  # native referenceImages support
-        "supports_refs":    True,
+        # No multi-image refs on Runway's image_to_video endpoint —
+        # `prompt_image` only takes a single first frame, or a
+        # {first, last}-position pair. Use direct-Google Veo or LTX
+        # downstream of this if true multi-ref identity is required.
+        "use_for":          "fast_iteration",
+        "supports_refs":    False,
     },
     "seedance2": {
         "id":               SEEDANCE2_MODEL,
@@ -573,8 +577,8 @@ VIDEO_MODELS = {
         "max_resolution":   "1080p",
         "native_audio":     False,
         "cost_per_sec":     0.36,
-        "use_for":          "long_oner",      # the only model that can do >8s in one call
-        "supports_refs":    True,
+        "use_for":          "long_oner",      # the only Runway model that can do >8s in one call
+        "supports_refs":    False,
     },
 }
 
@@ -1735,14 +1739,19 @@ def veo(
     if seed is not None:
         kwargs["seed"] = seed
 
-    # gen4.5 / seedance2 accept native reference_images; Veo on Runway
-    # does not, so for Veo we silently drop refs and rely on the first
-    # frame for identity (which is what the old pipeline did anyway).
-    if reference_images and model_meta and model_meta.get("supports_refs"):
-        kwargs["reference_images"] = [
-            {"tag": f"ref{i+1}", "uri": _data_uri(r)}
-            for i, r in enumerate(reference_images[:3])
-        ]
+    # Runway's image_to_video endpoint has NO multi-image reference
+    # support. `prompt_image` is either a single data-URI (the first
+    # frame) or a list of {position: 'first'|'last', uri} dicts —
+    # last-frame targeting only, not arbitrary refs. Older SDK
+    # versions tolerated a `reference_images=[{tag, uri}]` kwarg as
+    # an unrecognized extra; the current SDK strictly rejects it
+    # with TypeError. So we drop refs entirely on this path and rely
+    # on the first frame for identity (which is how Veo on Runway
+    # always worked anyway — for true multi-ref the cascade falls
+    # over to direct-Google Veo or LTX, both of which DO support
+    # multi-image refs natively).
+    if reference_images:
+        pass  # intentionally not forwarded — see comment above
 
     task = runway_client().image_to_video.create(**kwargs).wait_for_task_output()
     if not task.output:
