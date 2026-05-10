@@ -4,6 +4,8 @@
 
 The idea: give an AI agent a small but real virtual-production setup and let it experiment autonomously. It edits the creative parameters, runs the full pipeline (book → screenplay → cast → look book → storyboard → frames → video → edit → final mix), gets a critic-derived `film_loss` score, keeps or discards changes, and repeats. You wake up to a log of experiments and (hopefully) a better short film.
 
+**Inspiration:** The scaffolding split (`prepare.py` fixed, one editable pipeline file, human/agent instructions in `program.md`) and the overnight optimize-against-a-scalar loop are shaped after [Andrej Karpathy’s **autoresearch**](https://github.com/karpathy/autoresearch). Separately, Larry Ellison—reflecting on Steve Jobs in interviews such as [this **Macworld** piece](https://www.macworld.com/article/669662/larry-ellison-on-steve-jobs-personality-successes-and-failures.html)—described Jobs at Pixar obsessively critiquing iteration after iteration of *Toy Story* until the cut was worth shipping. Here, `evaluate.py` and `film_loss` stand in for that relentless review pass.
+
 The pipeline runs on the SOTA May-2026 stack, **consolidated through Runway**: a single Runway API key replaces what used to be four separate provider integrations (OpenAI for GPT Image 2, Google AI for Nano Banana 2 + Veo 3.1, ElevenLabs for SFX). Anthropic for Claude Opus 4.7 and Stability for Stable Audio 2.5 are kept on direct APIs. Total: **3 keys instead of 5**, **0 approval delays instead of 2** (no more OpenAI org verification or Google Cloud billing for video).
 
 ## How it works
