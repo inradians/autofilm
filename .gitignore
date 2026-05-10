@@ -1,0 +1,23 @@
+# Local pipeline outputs (large media + per-run snapshots)
+experiments/
+test_run
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+.venv/
+venv/
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Environment and secrets
+.env
+.env.local
+
+# OS / editor
+.DS_Store
+Thumbs.db

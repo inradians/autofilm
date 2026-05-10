@@ -1,0 +1,1774 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>autofilm — autoresearch loop</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root {
+    --bg:        #0e0f12;
+    --panel:     #16181d;
+    --panel2:    #1d2027;
+    --ink:       #e4e6ea;
+    --muted:     #8a8f99;
+    --border:    #2a2e38;
+    --accent:    #b85c47;
+    --accent-d:  #8c4234;
+    --good:      #5da877;
+    --bad:       #c75450;
+    --warn:      #d6a85c;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg); color: var(--ink);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text",
+                  "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  header {
+    padding: 14px 24px; border-bottom: 1px solid var(--border);
+    background: var(--panel);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  header h1 {
+    margin: 0; font-size: 17px; font-weight: 600;
+    letter-spacing: 0.04em; text-transform: uppercase;
+    color: var(--accent);
+  }
+  header .meta {
+    color: var(--muted); font-size: 12px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+
+  main {
+    display: grid; grid-template-columns: 380px 1fr; gap: 0;
+    min-height: calc(100vh - 50px);
+  }
+  aside {
+    background: var(--panel); border-right: 1px solid var(--border);
+    padding: 18px 20px; overflow-y: auto; max-height: calc(100vh - 50px);
+  }
+  section.main-area {
+    padding: 20px 28px; overflow-y: auto;
+    max-height: calc(100vh - 50px);
+  }
+
+  h2 {
+    font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); margin: 0 0 10px; font-weight: 600;
+  }
+  h3 { margin: 0 0 8px; font-size: 14px; font-weight: 600; }
+
+  /* Form */
+  .field { margin-bottom: 12px; }
+  .field label {
+    display: block; font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--muted); margin-bottom: 4px;
+  }
+  .field input[type="text"],
+  .field input[type="number"],
+  .field input[type="file"],
+  .field select {
+    width: 100%; background: var(--panel2); color: var(--ink);
+    border: 1px solid var(--border); border-radius: 4px;
+    padding: 8px 10px; font: inherit;
+  }
+  .field input[type="file"] { padding: 6px; }
+  .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+  button {
+    background: var(--accent); color: white; border: 0;
+    padding: 9px 14px; border-radius: 4px; font: inherit; font-weight: 600;
+    cursor: pointer;
+  }
+  button:hover:not(:disabled) { background: var(--accent-d); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  button.secondary { background: var(--panel2); color: var(--ink); border: 1px solid var(--border); }
+  button.secondary:hover:not(:disabled) { background: var(--border); }
+  button.danger    { background: var(--bad); }
+  button.danger:hover:not(:disabled) { background: #a8423e; }
+
+  /* Drag-drop zone */
+  .dropzone {
+    border: 2px dashed var(--border); border-radius: 6px;
+    background: var(--panel2);
+    padding: 14px; text-align: center; color: var(--muted);
+    font-size: 13px; cursor: pointer; transition: all 120ms;
+    position: relative;
+  }
+  .dropzone:hover { border-color: var(--muted); color: var(--ink); }
+  .dropzone.drag {
+    border-color: var(--accent); background: rgba(184, 92, 71, 0.08);
+    color: var(--ink);
+  }
+  .dropzone.has-file {
+    border-color: var(--good); border-style: solid;
+    color: var(--ink); background: rgba(93, 168, 119, 0.06);
+  }
+  .dropzone .filename {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 12px; word-break: break-all;
+  }
+  .dropzone .clear {
+    position: absolute; top: 6px; right: 8px;
+    background: none; border: 0; color: var(--muted);
+    font-size: 18px; cursor: pointer; padding: 0 4px;
+  }
+  .dropzone .clear:hover { color: var(--bad); }
+  .dropzone input[type="file"] { display: none; }
+
+  /* Status bar + progress */
+  .status-bar {
+    background: var(--panel2); border: 1px solid var(--border);
+    border-radius: 4px; padding: 10px 12px; margin: 10px 0;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px;
+  }
+  .status-bar .dot {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--muted); margin-right: 6px; vertical-align: middle;
+  }
+  .status-bar .dot.running { background: var(--warn); animation: pulse 1.4s infinite; }
+  .status-bar .dot.done    { background: var(--good); }
+  .status-bar .dot.error   { background: var(--bad); }
+  @keyframes pulse {
+    0%,100% { opacity: 1; }
+    50%     { opacity: 0.4; }
+  }
+
+  /* Stage stepper */
+  .stepper { margin: 10px 0 0; }
+  .stepper-iter {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px;
+    color: var(--muted); margin-bottom: 6px;
+  }
+  .stepper-iter b { color: var(--ink); }
+  .stages {
+    display: flex; flex-wrap: wrap; gap: 4px;
+  }
+  .stage-pill {
+    background: var(--panel2); border: 1px solid var(--border);
+    border-radius: 3px; padding: 3px 8px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 10px; color: var(--muted);
+    transition: all 120ms;
+  }
+  .stage-pill.done {
+    background: rgba(93, 168, 119, 0.15);
+    border-color: var(--good); color: var(--good);
+  }
+  .stage-pill.current {
+    background: rgba(214, 168, 92, 0.15);
+    border-color: var(--warn); color: var(--warn);
+    animation: glow 1.6s infinite;
+  }
+  @keyframes glow {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(214, 168, 92, 0.4); }
+    50%      { box-shadow: 0 0 6px 1px rgba(214, 168, 92, 0.4); }
+  }
+
+  pre.log {
+    background: #0a0b0e; color: #c2c6cf;
+    border: 1px solid var(--border); border-radius: 4px;
+    padding: 10px; max-height: 200px; overflow: auto;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px;
+    line-height: 1.45; white-space: pre-wrap; margin: 6px 0 0;
+  }
+
+  hr.div { border: 0; border-top: 1px solid var(--border); margin: 18px 0; }
+
+  /* Lightbox — click any thumb/video to view it full-size for analysis.
+     Centers the media, dims the rest of the page, ESC or backdrop-
+     click to close. Designed to be visually unobtrusive so the user
+     remembers it's a temporary inspection overlay, not a full route. */
+  .lightbox {
+    position: fixed; inset: 0;
+    background: rgba(8, 9, 12, 0.92);
+    display: none; align-items: center; justify-content: center;
+    z-index: 1000; cursor: zoom-out;
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+  }
+  .lightbox.open { display: flex; }
+  .lightbox-content {
+    max-width: 92vw; max-height: 88vh;
+    position: relative;
+    cursor: default;
+    display: flex; flex-direction: column;
+    background: #0a0b0e;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .lightbox-content > img,
+  .lightbox-content > video {
+    max-width: 92vw; max-height: 80vh;
+    object-fit: contain; background: #000;
+    display: block;
+  }
+  .lightbox-caption {
+    padding: 10px 14px;
+    border-top: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 14px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 11px; color: var(--muted);
+  }
+  .lightbox-caption .path { color: var(--ink); word-break: break-all; }
+  .lightbox-caption .model-tag {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 2px 8px; border-radius: 3px;
+    background: var(--lb-color, var(--panel2));
+    color: #0a0b0e; font-weight: 600;
+  }
+  .lightbox-close {
+    position: absolute; top: 8px; right: 8px;
+    background: rgba(0, 0, 0, 0.6); color: #c2c6cf;
+    border: 1px solid var(--border); border-radius: 3px;
+    width: 28px; height: 28px;
+    font-size: 16px; line-height: 1; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .lightbox-close:hover { color: #fff; border-color: var(--ink); }
+
+  /* Make every thumb a pointer + show 'this is clickable' on hover */
+  .thumb { cursor: zoom-in; }
+  .thumb:hover { outline: 1px solid var(--ink); outline-offset: 1px; }
+
+  /* Main area: experiment focus */
+  .empty {
+    color: var(--muted); font-style: italic; padding: 60px 20px;
+    text-align: center;
+  }
+  .exp-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    margin-bottom: 14px; padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .exp-head .id {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-weight: 600; font-size: 16px;
+  }
+  .exp-head .loss {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 14px;
+  }
+  .exp-head .loss .v { color: var(--accent); font-weight: 600; }
+
+  .scores {
+    display: flex; flex-wrap: wrap; gap: 14px;
+    font-size: 11px; color: var(--muted);
+    margin-bottom: 18px; font-family: ui-monospace, monospace;
+  }
+  .scores span b { color: var(--ink); }
+
+  .stage-section { margin-top: 22px; }
+  .stage-section h4 {
+    margin: 0 0 10px; font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);
+  }
+
+  /* Collapsible stage sections */
+  details.stage-section { margin-top: 14px; }
+  details.stage-section > summary {
+    cursor: pointer; list-style: none;
+    padding: 8px 12px; border-radius: 4px;
+    background: var(--panel); border: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    user-select: none;
+    transition: background 120ms;
+  }
+  details.stage-section > summary::-webkit-details-marker { display: none; }
+  details.stage-section > summary:hover { background: var(--panel2); }
+  details.stage-section > summary .label {
+    font-size: 11px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--muted);
+  }
+  details.stage-section[open] > summary .label { color: var(--ink); }
+  details.stage-section > summary .count {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 11px; color: var(--muted);
+  }
+  details.stage-section > summary::after {
+    content: "▸"; color: var(--muted); font-size: 11px;
+    margin-left: 8px; transition: transform 120ms;
+  }
+  details.stage-section[open] > summary::after { transform: rotate(90deg); }
+  details.stage-section > .body { padding: 12px 4px 4px; }
+
+  /* Audio waveform card — replaces the bare <audio> element */
+  .audio-row {
+    display: grid; grid-template-columns: 1fr; gap: 8px;
+    margin: 10px 0;
+  }
+  .audio-card {
+    background: #0a0b0e; border: 1px solid var(--border);
+    border-radius: 4px; padding: 10px 12px;
+    display: grid;
+    grid-template-columns: 200px 1fr auto;
+    gap: 14px; align-items: center;
+  }
+  .audio-card .name {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 11px; color: var(--ink);
+    word-break: break-all;
+  }
+  .audio-card canvas {
+    width: 100%; height: 48px; display: block;
+    background: var(--panel2); border-radius: 3px;
+  }
+  .audio-card audio {
+    height: 32px; width: 220px;
+  }
+  .audio-card audio::-webkit-media-controls-panel {
+    background: var(--panel2);
+  }
+  @media (max-width: 1200px) {
+    .audio-card {
+      grid-template-columns: 1fr; gap: 6px;
+    }
+    .audio-card audio { width: 100%; }
+  }
+
+  .thumbs {
+    display: grid; gap: 8px;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  }
+  .thumbs.video {
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  }
+  .thumb {
+    background: #000; border: 1px solid var(--border); border-radius: 3px;
+    overflow: hidden; aspect-ratio: 16 / 9; position: relative;
+  }
+  .thumb img, .thumb video {
+    width: 100%; height: 100%; object-fit: cover; display: block;
+  }
+  .thumb .cap {
+    position: absolute; bottom: 0; left: 0; right: 0;
+    background: linear-gradient(to top, rgba(0,0,0,0.85), transparent);
+    color: #fff; font-size: 10px; padding: 12px 6px 4px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    pointer-events: none;
+  }
+  .thumb.has-model {
+    border-width: 2px;   /* CSS var --model-color set inline per thumb */
+    border-color: var(--model-color, var(--border));
+  }
+  .thumb .model-badge {
+    position: absolute; top: 4px; left: 4px;
+    background: var(--model-color, #444);
+    color: #0a0b0e;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 9px; font-weight: 600; letter-spacing: 0.02em;
+    padding: 1px 6px; border-radius: 2px;
+    pointer-events: none;
+    max-width: calc(100% - 8px);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .audio-card.has-model {
+    border-left: 3px solid var(--model-color, var(--border));
+  }
+  .audio-card .model-badge {
+    background: var(--model-color, #444);
+    color: #0a0b0e;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 9px; font-weight: 600;
+    padding: 1px 6px; border-radius: 2px;
+    margin-left: 8px;
+    display: inline-block;
+  }
+  .final-mp4 { aspect-ratio: 16 / 9; max-width: 720px; }
+
+  /* Models legend — shown above the stage sections, listing every
+     model that produced an artifact in this experiment with its
+     color swatch. */
+  .models-legend {
+    display: flex; flex-wrap: wrap; gap: 6px;
+    margin: 14px 0; padding: 10px 12px;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 4px;
+  }
+  .models-legend .legend-title {
+    font-size: 10px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--muted);
+    align-self: center; margin-right: 6px;
+  }
+  .models-legend .swatch {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-family: ui-monospace, monospace; font-size: 10.5px;
+    padding: 3px 7px; border-radius: 3px;
+    background: var(--panel2); border: 1px solid var(--border);
+    color: var(--ink);
+  }
+  .models-legend .swatch::before {
+    content: ""; width: 9px; height: 9px; border-radius: 50%;
+    background: var(--swatch-color);
+  }
+
+  .pill {
+    display: inline-block; padding: 1px 6px; border-radius: 10px;
+    font-size: 10px; font-family: ui-monospace, monospace;
+    margin-left: 8px; background: var(--panel2);
+    border: 1px solid var(--border); color: var(--muted);
+  }
+  .pill.parent  { color: var(--warn); border-color: var(--warn); }
+  .pill.live    { color: var(--good); border-color: var(--good);
+                  animation: pulse 1.4s infinite; }
+
+  .plan {
+    font-size: 11px; color: var(--muted); margin-top: 4px;
+    font-family: ui-monospace, monospace;
+  }
+
+  /* Script + storyboard summary card. Lives above the cost card so
+     the user can see what the pipeline parsed at a glance: title,
+     scene count, cast size, locations, shot total, total runtime —
+     and a small per-scene breakdown of (shot count × duration). */
+  .summary {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 6px; padding: 14px 18px; margin: 18px 0;
+  }
+  .summary .title-row {
+    display: flex; align-items: baseline; justify-content: space-between;
+    margin-bottom: 12px; gap: 12px;
+  }
+  .summary .title-row .title {
+    font-size: 15px; font-weight: 600; color: var(--ink);
+  }
+  .summary .title-row .source {
+    font-size: 11px; color: var(--muted);
+    font-family: ui-monospace, monospace;
+  }
+  .summary .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+    gap: 8px 18px;
+    border-top: 1px solid var(--border);
+    padding-top: 12px;
+  }
+  .summary .stat .v {
+    font-family: ui-monospace, monospace;
+    font-size: 18px; color: var(--accent); display: block;
+    line-height: 1.2;
+  }
+  .summary .stat .k {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--muted); margin-top: 2px;
+  }
+  .summary .by-scene {
+    margin-top: 14px; border-top: 1px solid var(--border); padding-top: 12px;
+  }
+  .summary .by-scene .lbl {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--muted); margin-bottom: 6px;
+  }
+  .summary .by-scene table {
+    width: 100%; border-collapse: collapse;
+    font-family: ui-monospace, monospace; font-size: 11.5px;
+  }
+  .summary .by-scene td {
+    padding: 3px 0; color: var(--ink);
+  }
+  .summary .by-scene td:nth-child(1) { color: var(--muted); }
+  .summary .by-scene td:nth-child(3),
+  .summary .by-scene td:nth-child(4) { text-align: right; color: var(--muted); }
+
+  /* Cost card */
+  .cost {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 6px; padding: 14px 18px; margin: 18px 0;
+    display: grid; grid-template-columns: auto 1fr; gap: 14px 22px;
+    align-items: start;
+  }
+  .cost .total {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  .cost .total .v {
+    font-size: 22px; font-weight: 600; color: var(--accent);
+    line-height: 1;
+  }
+  .cost .total .label {
+    font-size: 10px; text-transform: uppercase; color: var(--muted);
+    letter-spacing: 0.06em; margin-bottom: 4px;
+  }
+  .cost .breakdown {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 12px 24px;
+    font-size: 12px;
+  }
+  .cost .breakdown h5 {
+    margin: 0 0 6px; font-size: 10px; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--muted); font-weight: 600;
+  }
+  .cost .breakdown .row {
+    display: flex; justify-content: space-between;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 11px; color: var(--ink);
+    padding: 1px 0;
+  }
+  .cost .breakdown .row .v { color: var(--accent); }
+  .cost .meta {
+    grid-column: 1 / -1;
+    font-size: 11px; color: var(--muted);
+    font-family: ui-monospace, monospace;
+  }
+
+  details { margin-top: 8px; }
+  details summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+  details summary:hover { color: var(--ink); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>autofilm · autoresearch loop</h1>
+  <div class="meta" id="meta">connecting…</div>
+</header>
+
+<main>
+  <!-- ── Sidebar ───────────────────────────────────────────── -->
+  <aside>
+    <h2>experiments</h2>
+    <div class="field">
+      <select id="expDropdown">
+        <option value="">— newest experiment —</option>
+      </select>
+    </div>
+
+    <hr class="div" />
+
+    <h2>configure run</h2>
+
+    <form id="runForm" enctype="multipart/form-data">
+      <div class="field">
+        <label>book pdf</label>
+        <div class="dropzone" id="bookDropzone">
+          <span class="placeholder">drag &amp; drop a .pdf here, or click to browse</span>
+          <input id="bookFile" name="book_file" type="file" accept=".pdf,application/pdf" />
+          <button type="button" class="clear" id="bookClear" style="display:none">×</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="bookPath">…or server-local path</label>
+        <input id="bookPath" name="book_path" type="text"
+               placeholder="/path/to/book.pdf" />
+      </div>
+
+      <div class="field">
+        <label for="moodboards">moodboards — general aesthetic / "vibe"</label>
+        <input id="moodboards" name="moodboards" type="file"
+               accept="image/png,image/jpeg,image/webp" multiple />
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">
+          Reference images for the overall look of the film. Not
+          per-scene — these set the master style frame.
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="director">director  <span style="text-transform:none;color:var(--muted)">(optional)</span></label>
+        <input id="director" name="director" type="text"
+               placeholder="e.g. Denis Villeneuve" />
+      </div>
+
+      <div class="field">
+        <label for="cinematographer">cinematographer  <span style="text-transform:none;color:var(--muted)">(optional)</span></label>
+        <input id="cinematographer" name="cinematographer" type="text"
+               placeholder="e.g. Roger Deakins" />
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <label for="iterations">iterations</label>
+          <input id="iterations" name="iterations" type="number"
+                 value="3" min="1" max="20" />
+        </div>
+        <div class="field">
+          <label for="threshold">threshold</label>
+          <select id="threshold" name="threshold">
+            <option value="low">low</option>
+            <option value="medium" selected>medium</option>
+            <option value="high">high</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="targetLoss">target film_loss</label>
+        <input id="targetLoss" name="target_loss" type="number"
+               value="0.15" min="0" max="1" step="0.01" />
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <label for="maxScenes">max scenes</label>
+          <!-- Caps how many scenes parse_script keeps. Lower = faster
+               iteration; this is the strongest cost lever. -->
+          <input id="maxScenes" name="max_scenes" type="number"
+                 value="3" min="1" max="50"
+                 title="MAX_SCENES env var. Caps how many scenes the pipeline renders." />
+        </div>
+        <div class="field">
+          <label for="seed">seed</label>
+          <!-- Random seed passed through to image / video generators
+               for reproducible takes. Blank = pipeline picks one. -->
+          <input id="seed" name="seed" type="number"
+                 placeholder="auto"
+                 title="Random seed for reproducibility. Leave blank for a fresh random seed each run." />
+        </div>
+      </div>
+
+      <button type="submit" id="startBtn">start run</button>
+      <button type="button" id="stopBtn" class="danger" style="display:none">stop</button>
+    </form>
+
+    <div class="status-bar" id="runStatus">
+      <span class="dot"></span><span id="runStatusText">idle</span>
+    </div>
+
+    <!-- Progress stepper -->
+    <div class="stepper" id="stepper" style="display:none">
+      <div class="stepper-iter" id="stepperIter"></div>
+      <div class="stages" id="stages"></div>
+    </div>
+
+    <details>
+      <summary>log tail</summary>
+      <pre class="log" id="runLog"></pre>
+    </details>
+
+    <hr class="div" />
+
+    <h2>api smoke test</h2>
+    <div class="field-row">
+      <div class="field">
+        <label for="smokeCategory">category</label>
+        <select id="smokeCategory">
+          <option value="all">all</option>
+          <option value="image">image</option>
+          <option value="video">video</option>
+          <option value="audio">audio</option>
+        </select>
+      </div>
+      <div class="field" style="display:flex;align-items:flex-end">
+        <button type="button" id="smokeBtn" class="secondary"
+                style="width:100%">run</button>
+      </div>
+    </div>
+
+    <div class="status-bar" id="smokeStatus">
+      <span class="dot"></span><span id="smokeStatusText">idle</span>
+    </div>
+    <details>
+      <summary>log tail</summary>
+      <pre class="log" id="smokeLog"></pre>
+    </details>
+  </aside>
+
+  <!-- ── Main area ─────────────────────────────────────────── -->
+  <section class="main-area" id="mainArea">
+    <div class="empty" id="mainEmpty">No experiments yet — start a run to populate this view.</div>
+  </section>
+</main>
+
+<!-- Lightbox overlay — populated by openLightbox(), shown via .open -->
+<div class="lightbox" id="lightbox" role="dialog" aria-modal="true" hidden>
+  <div class="lightbox-content" id="lightboxContent">
+    <button type="button" class="lightbox-close" id="lightboxClose"
+            aria-label="Close">×</button>
+    <!-- media element (img or video) inserted here at open time -->
+    <div class="lightbox-caption">
+      <span class="path" id="lightboxPath"></span>
+      <span class="model-tag" id="lightboxModelTag" style="display:none"></span>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let pipelineStages = [];   // populated from /api/state
+let selectedExpKey = "";   // empty = follow latest
+let lastExperimentList = [];
+let currentlyShownKey  = "";   // last exp we actually rendered
+let lastDetailFingerprint = ""; // hash of last rendered detail to skip no-ops
+let appliedLastRun     = false; // populate-from-last-run only once
+
+// Cheap stable hash of an object's enumerable shape — used to skip
+// re-renders when nothing visible has changed (avoids video flicker).
+function fingerprintDetail(data) {
+  if (!data) return "";
+  const b = data.bible || {};
+  const st = b.stages || {};
+  const counts = {
+    refs:    Object.keys(st.references?.by_scene_char    || {}).length,
+    frames:  Object.keys(st.frames?.by_scene_shot        || {}).length,
+    clips:   Object.keys(st.clips?.by_scene_shot_take    || {}).length,
+    music:   Object.keys(st.music?.by_scene              || {}).length,
+    narr:    Object.keys(st.narration?.by_scene          || {}).length,
+    moods:   Object.keys(st.locations?.moodboards        || {}).length,
+    sf:      st.lookbook?.style_frame ? 1 : 0,
+    final:   st.final?.path ? 1 : 0,
+  };
+  const cost = data.cost?.total_usd ?? 0;
+  const loss = b.metric?.film_loss ?? null;
+  return JSON.stringify({ counts, cost, loss, parent: b.parent_exp });
+}
+
+// ── Render helpers ──────────────────────────────────────────
+
+function artifactURL(book_slug, exp_id, relpath) {
+  return `/api/artifact/${encodeURIComponent(book_slug)}/${encodeURIComponent(exp_id)}/${relpath}`;
+}
+
+// ── Model color attribution ──────────────────────────────────────
+//
+// Each artifact in an experiment is created by a specific model
+// (gen4_image, nano_banana, veo, ltx-2-3-pro, eleven_multilingual_v2,
+// stable_audio, ...). The pipeline frequently falls back across models
+// in the same run — e.g. a Veo failure cascades to LTX, a Gen4 fail
+// cascades to nano_banana — so a particular shot may end up rendered
+// by a different model than the storyboard assumed. Showing the model
+// attribution per thumb, color-coded, makes that drift visible at a
+// glance without having to dig through prompts.json.
+//
+// Color is a deterministic hash of the model FAMILY (gen4 / nano /
+// veo / ltx / etc) so all variants of one family share a hue. We hash
+// to HSL with fixed saturation/lightness so colors are distinct but
+// readable on the dark background.
+function _modelFamily(model) {
+  if (!model) return '';
+  // Strip suffixes that are user-irrelevant: '+refs', 'core', 'sd3', etc.
+  let m = String(model).toLowerCase()
+    .replace(/\+refs$/, '')
+    .replace(/_(core|sd3|ultra|preview|fast|turbo|pro|2-3)\b/g, '')
+    .replace(/-/g, '_');
+  // Family roots — first underscored token captures the lineage.
+  const root = m.split('_')[0];
+  return root || m;
+}
+function _modelColor(model) {
+  const fam = _modelFamily(model);
+  if (!fam) return '#666';
+  // FNV-1a 32-bit hash for stable hue assignment.
+  let h = 2166136261;
+  for (let i = 0; i < fam.length; i++) {
+    h ^= fam.charCodeAt(i);
+    h = (h * 16777619) >>> 0;
+  }
+  const hue = h % 360;
+  return `hsl(${hue}, 65%, 60%)`;
+}
+
+// Truncated label for the badge (the full name goes in the title attr).
+function _modelLabel(model) {
+  if (!model) return '';
+  const m = String(model);
+  // Common cleanup so the badge reads naturally:
+  return m
+    .replace('_image', '')
+    .replace('_audio', '')
+    .replace(/^stable_/, 'stab.')
+    .replace(/^eleven_/, 'eleven.')
+    .replace(/^google_/, 'g.')
+    .replace(/_preview$/, '')
+    .replace(/_v\d+$/, '')
+    .slice(0, 24);
+}
+
+// Build a legend listing every distinct model that produced an
+// artifact in this experiment, with its color swatch. Returns null
+// if there's nothing to show (e.g. fresh experiment with no
+// prompts.json yet).
+function _buildModelsLegend(modelsByTarget) {
+  const seen = new Set();
+  for (const m of Object.values(modelsByTarget || {})) {
+    if (m) seen.add(m);
+  }
+  if (!seen.size) return null;
+
+  const legend = document.createElement('div');
+  legend.className = 'models-legend';
+  const title = document.createElement('span');
+  title.className = 'legend-title';
+  title.textContent = 'models';
+  legend.appendChild(title);
+
+  // Sort alphabetically so the legend has a stable order across reloads.
+  const sorted = [...seen].sort();
+  for (const m of sorted) {
+    const sw = document.createElement('span');
+    sw.className = 'swatch';
+    sw.style.setProperty('--swatch-color', _modelColor(m));
+    sw.textContent = m;
+    sw.title = `family: ${_modelFamily(m)}`;
+    legend.appendChild(sw);
+  }
+  return legend;
+}
+
+function makeThumb(book_slug, exp_id, relpath, caption, isVideo = false, model = '') {
+  const wrap = document.createElement('div');
+  wrap.className = 'thumb';
+  if (model) {
+    wrap.classList.add('has-model');
+    wrap.style.setProperty('--model-color', _modelColor(model));
+    wrap.title = `model: ${model}`;
+  }
+  let media;
+  if (isVideo) {
+    media = document.createElement('video');
+    media.muted = true; media.controls = true; media.preload = 'metadata';
+    // Stop click bubbling from native video controls (play/pause/etc.)
+    // to the wrap — otherwise pausing the video opens the lightbox.
+    media.addEventListener('click', (e) => e.stopPropagation());
+  } else {
+    media = document.createElement('img');
+    media.loading = 'lazy';
+  }
+  media.src = artifactURL(book_slug, exp_id, relpath);
+  wrap.appendChild(media);
+  if (model) {
+    const badge = document.createElement('div');
+    badge.className = 'model-badge';
+    badge.textContent = _modelLabel(model);
+    wrap.appendChild(badge);
+  }
+  if (caption) {
+    const cap = document.createElement('div');
+    cap.className = 'cap';
+    cap.textContent = caption;
+    wrap.appendChild(cap);
+  }
+
+  // Click-to-zoom — lightbox opens with the same media, full-size,
+  // for visual inspection (was a recurring user request whenever we
+  // wanted to inspect a freeze-frame or compare two takes).
+  wrap.addEventListener('click', () => {
+    openLightbox({
+      src: media.src,
+      isVideo: isVideo,
+      caption: caption || relpath,
+      model: model,
+    });
+  });
+  return wrap;
+}
+
+// ── Lightbox ──────────────────────────────────────────────────────────
+//
+// Click any thumb (image or video) to view it full-size in an overlay.
+// ESC or click-outside closes. Used for analyzing details that thumb-
+// sized media obscures — frozen frames, lip-sync issues, color drift.
+
+function openLightbox({ src, isVideo, caption, model }) {
+  const lb      = $('lightbox');
+  const content = $('lightboxContent');
+  const pathEl  = $('lightboxPath');
+  const tag     = $('lightboxModelTag');
+
+  // Remove the previous media element if any (keep the close button
+  // and caption row; both have stable IDs).
+  const prev = content.querySelector('img, video');
+  if (prev) prev.remove();
+
+  // Build the new media element. <video> inherits autoplay etc. from
+  // user interaction; we don't autoplay so it doesn't surprise the
+  // user with sound when they were just inspecting visuals.
+  let media;
+  if (isVideo) {
+    media = document.createElement('video');
+    media.controls = true; media.preload = 'metadata';
+  } else {
+    media = document.createElement('img');
+  }
+  media.src = src;
+  // Insert at the top of .lightbox-content, above the caption row.
+  content.insertBefore(media, content.querySelector('.lightbox-caption'));
+
+  pathEl.textContent = caption;
+  if (model) {
+    tag.style.display = '';
+    tag.textContent = model;
+    tag.style.setProperty('--lb-color', _modelColor(model));
+  } else {
+    tag.style.display = 'none';
+  }
+
+  lb.hidden = false;
+  lb.classList.add('open');
+}
+
+function closeLightbox() {
+  const lb = $('lightbox');
+  if (!lb || !lb.classList.contains('open')) return;
+  // Pause any playing video before hiding, so audio doesn't keep going.
+  const v = lb.querySelector('video');
+  if (v) { try { v.pause(); } catch {} }
+  lb.classList.remove('open');
+  lb.hidden = true;
+}
+
+function _initLightboxControls() {
+  const lb = $('lightbox');
+  if (!lb) return;
+  // Click backdrop closes; click on inner content does NOT (it would
+  // close even when the user is interacting with video controls).
+  lb.addEventListener('click', (e) => {
+    if (e.target === lb) closeLightbox();
+  });
+  $('lightboxClose').addEventListener('click', closeLightbox);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeLightbox();
+  });
+}
+
+function makeStageSection(title, count = null, open = false) {
+  // Use a <details> element for native browser collapse behavior so
+  // keyboard users get accessible toggle semantics for free.
+  const s = document.createElement('details');
+  s.className = 'stage-section';
+  if (open) s.open = true;
+  const summary = document.createElement('summary');
+  const label = document.createElement('span');
+  label.className = 'label';
+  label.textContent = title;
+  summary.appendChild(label);
+  if (count != null) {
+    const c = document.createElement('span');
+    c.className = 'count';
+    c.textContent = `${count} item${count === 1 ? '' : 's'}`;
+    summary.appendChild(c);
+  }
+  s.appendChild(summary);
+  // Body container — callers append children to s.body, not s, so the
+  // collapse animation works correctly without including <summary>.
+  const body = document.createElement('div');
+  body.className = 'body';
+  s.appendChild(body);
+  s.body = body;   // attached for caller convenience
+  return s;
+}
+
+// Decode an audio file and draw a normalized peak-bar waveform onto a
+// canvas. Lazy: only decodes when the canvas is first drawn (we trigger
+// it immediately per audio card, but a future enhancement could defer
+// until the section is opened).
+async function drawWaveform(canvas, url) {
+  // Idempotent — skip if we've already decoded this canvas.
+  if (canvas.dataset.drawn === '1') return;
+  canvas.dataset.drawn = '1';
+
+  // Match the canvas pixel buffer to its CSS size for sharp rendering.
+  const dpr = window.devicePixelRatio || 1;
+  const cssW = canvas.clientWidth || 600;
+  const cssH = canvas.clientHeight || 48;
+  canvas.width = Math.floor(cssW * dpr);
+  canvas.height = Math.floor(cssH * dpr);
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  // Placeholder while we decode — keeps the layout stable.
+  ctx.fillStyle = 'rgba(184, 92, 71, 0.25)';
+  ctx.fillRect(0, cssH / 2 - 1, cssW, 2);
+
+  let arrayBuffer;
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    arrayBuffer = await resp.arrayBuffer();
+  } catch (e) {
+    return;   // network or 404 — leave the placeholder line
+  }
+
+  let audioBuffer;
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    const ac = new AC();
+    audioBuffer = await ac.decodeAudioData(arrayBuffer);
+    // Best-effort close — some browsers don't auto-GC suspended contexts.
+    if (ac.close) ac.close();
+  } catch {
+    return;
+  }
+
+  // Mix to mono for visualization. Two channels averaged is fine.
+  const ch0 = audioBuffer.getChannelData(0);
+  const ch1 = audioBuffer.numberOfChannels > 1
+    ? audioBuffer.getChannelData(1) : null;
+  const N = ch0.length;
+
+  // Bucket the samples into one bar per pixel column. Use peak
+  // amplitude per bucket — visually clearer than RMS at small sizes.
+  const buckets = Math.max(1, Math.floor(cssW));
+  const samplesPerBucket = Math.max(1, Math.floor(N / buckets));
+  ctx.clearRect(0, 0, cssW, cssH);
+
+  const barWidth = cssW / buckets;
+  const mid = cssH / 2;
+  ctx.fillStyle = '#b85c47';   // accent
+
+  for (let i = 0; i < buckets; i++) {
+    let peak = 0;
+    const start = i * samplesPerBucket;
+    const end = Math.min(N, start + samplesPerBucket);
+    for (let j = start; j < end; j++) {
+      const v = ch1 ? (Math.abs(ch0[j]) + Math.abs(ch1[j])) / 2 : Math.abs(ch0[j]);
+      if (v > peak) peak = v;
+    }
+    const h = Math.max(1, peak * (cssH - 2));
+    ctx.fillRect(i * barWidth, mid - h / 2, Math.max(1, barWidth - 0.5), h);
+  }
+}
+
+function makeAudioCard(book_slug, exp_id, relpath, name, model = '') {
+  const url = artifactURL(book_slug, exp_id, relpath);
+  const card = document.createElement('div');
+  card.className = 'audio-card';
+  if (model) {
+    card.classList.add('has-model');
+    card.style.setProperty('--model-color', _modelColor(model));
+    card.title = `model: ${model}`;
+  }
+
+  const nameEl = document.createElement('div');
+  nameEl.className = 'name';
+  nameEl.textContent = name;
+  if (model) {
+    const badge = document.createElement('span');
+    badge.className = 'model-badge';
+    badge.textContent = _modelLabel(model);
+    nameEl.appendChild(badge);
+  }
+  card.appendChild(nameEl);
+
+  const canvas = document.createElement('canvas');
+  card.appendChild(canvas);
+
+  const audio = document.createElement('audio');
+  audio.src = url; audio.controls = true; audio.preload = 'metadata';
+  card.appendChild(audio);
+
+  // Defer drawing until the canvas is mounted (it needs clientWidth).
+  // Drawing happens once per card; if the parent <details> is closed
+  // when the card is rendered, clientWidth may be 0 — drawWaveform
+  // handles that with a fallback width and only decodes once.
+  requestAnimationFrame(() => drawWaveform(canvas, url));
+
+  return card;
+}
+
+function fmtUSD(v) {
+  if (v == null) return '—';
+  if (v >= 100)   return `$${v.toFixed(0)}`;
+  if (v >= 1)     return `$${v.toFixed(2)}`;
+  if (v >= 0.01)  return `$${v.toFixed(3)}`;
+  return `$${v.toFixed(4)}`;
+}
+
+function _fmtDuration(seconds) {
+  // 0       → '0:00'
+  // 95      → '1:35'
+  // 4523    → '1:15:23'
+  if (!seconds || seconds <= 0) return '0:00';
+  const s = Math.round(seconds);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+  const mm = String(m).padStart(h ? 2 : 1, '0');
+  const sss = String(ss).padStart(2, '0');
+  return h ? `${h}:${mm}:${sss}` : `${mm}:${sss}`;
+}
+
+function renderSummary(stages) {
+  const sc  = stages.script;
+  const cst = stages.cast;
+  const loc = stages.locations;
+  const sb  = stages.storyboard;
+  // Nothing to show until parse_script ran.
+  if (!sc) return null;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'summary';
+
+  // Title row
+  const titleRow = document.createElement('div');
+  titleRow.className = 'title-row';
+  const titleEl = document.createElement('div');
+  titleEl.className = 'title';
+  titleEl.textContent = sc.title || 'Untitled';
+  titleRow.appendChild(titleEl);
+  // Optional source path / book filename, dimmed
+  if (sc.source) {
+    const src = document.createElement('div');
+    src.className = 'source';
+    src.textContent = sc.source;
+    titleRow.appendChild(src);
+  }
+  wrap.appendChild(titleRow);
+
+  // Stat tiles row. Each tile is value-on-top, label-on-bottom (k/v
+  // semantics — the value reads first because that's the headline).
+  const stats = document.createElement('div');
+  stats.className = 'stats';
+
+  function tile(value, label) {
+    const t = document.createElement('div');
+    t.className = 'stat';
+    const v = document.createElement('div');
+    v.className = 'v';
+    v.textContent = value;
+    const k = document.createElement('div');
+    k.className = 'k';
+    k.textContent = label;
+    t.appendChild(v); t.appendChild(k);
+    return t;
+  }
+
+  stats.appendChild(tile(sc.n_scenes ?? '—', 'scenes'));
+  stats.appendChild(tile(sc.n_characters ?? '—', 'characters'));
+  if (cst) stats.appendChild(tile(cst.n_cast ?? '—', 'cast'));
+  if (loc) stats.appendChild(tile(loc.n_locations ?? '—', 'locations'));
+  if (sb)  stats.appendChild(tile(sb.n_shots ?? '—', 'shots'));
+  if (sb)  stats.appendChild(tile(_fmtDuration(sb.total_seconds), 'runtime'));
+  wrap.appendChild(stats);
+
+  // Per-scene breakdown table — only when storyboard is available.
+  // Shows scene id, shot count, and duration. Doesn't list shot
+  // titles to keep the card compact; the takes section below
+  // shows everything visually.
+  if (sb && sb.shots_by_scene && Object.keys(sb.shots_by_scene).length) {
+    const sec = document.createElement('div');
+    sec.className = 'by-scene';
+    const lbl = document.createElement('div');
+    lbl.className = 'lbl';
+    lbl.textContent = 'shots by scene';
+    sec.appendChild(lbl);
+
+    const tbl = document.createElement('table');
+    const sceneIds = Object.keys(sb.shots_by_scene);
+    for (const sid of sceneIds) {
+      const tr = document.createElement('tr');
+      const shots = sb.shots_by_scene[sid] || 0;
+      const dur = (sb.seconds_by_scene && sb.seconds_by_scene[sid]) || 0;
+      tr.innerHTML =
+        `<td>${sid}</td>` +
+        `<td>${shots} shot${shots === 1 ? '' : 's'}</td>` +
+        `<td>${_fmtDuration(dur)}</td>`;
+      tbl.appendChild(tr);
+    }
+    sec.appendChild(tbl);
+    wrap.appendChild(sec);
+  }
+
+  return wrap;
+}
+
+function renderCost(cost) {
+  const wrap = document.createElement('div');
+  wrap.className = 'cost';
+
+  const total = document.createElement('div');
+  total.className = 'total';
+  total.innerHTML = `
+    <div class="label">total cost</div>
+    <div class="v">${fmtUSD(cost.total_usd)}</div>
+  `;
+  wrap.appendChild(total);
+
+  const breakdown = document.createElement('div');
+  breakdown.className = 'breakdown';
+
+  // by model
+  const byModel = document.createElement('div');
+  byModel.innerHTML = '<h5>by model</h5>';
+  for (const [m, v] of Object.entries(cost.by_model || {})) {
+    if (v <= 0) continue;
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.innerHTML = `<span>${m || '(unknown)'}</span><span class="v">${fmtUSD(v)}</span>`;
+    byModel.appendChild(row);
+  }
+  breakdown.appendChild(byModel);
+
+  // by stage
+  const byStage = document.createElement('div');
+  byStage.innerHTML = '<h5>by stage</h5>';
+  for (const [s, v] of Object.entries(cost.by_stage || {})) {
+    if (v <= 0) continue;
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.innerHTML = `<span>${s}</span><span class="v">${fmtUSD(v)}</span>`;
+    byStage.appendChild(row);
+  }
+  breakdown.appendChild(byStage);
+
+  wrap.appendChild(breakdown);
+
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  let m = `${cost.n_calls} api call${cost.n_calls === 1 ? '' : 's'}`;
+  if (cost.n_unknown) m += ` · ${cost.n_unknown} unknown-rate`;
+  m += ` · estimates ±20%, treat as approximate`;
+  meta.textContent = m;
+  wrap.appendChild(meta);
+
+  return wrap;
+}
+
+function renderExperimentDetail(data, isLive = false) {
+  const target = $('mainArea');
+  // Render into a child container, leaving #mainEmpty as a sibling
+  // we can show/hide. Lets us swap the experiment view in/out without
+  // recreating the empty-state placeholder each time.
+  let detailHost = target.querySelector('#expDetail');
+  if (!detailHost) {
+    detailHost = document.createElement('div');
+    detailHost.id = 'expDetail';
+    target.appendChild(detailHost);
+  }
+  detailHost.innerHTML = '';
+  // Hide the empty placeholder once we actually have content to show.
+  const empty = $('mainEmpty');
+  if (empty) empty.style.display = 'none';
+  const container = document.createElement('div');
+
+  const head = document.createElement('div');
+  head.className = 'exp-head';
+
+  const left = document.createElement('div');
+  const idEl = document.createElement('span');
+  idEl.className = 'id';
+  idEl.textContent = data.qualified;
+  left.appendChild(idEl);
+  if (data.bible && data.bible.parent_exp) {
+    const pill = document.createElement('span');
+    pill.className = 'pill parent';
+    pill.textContent = `← ${data.bible.parent_exp}`;
+    left.appendChild(pill);
+  }
+  if (isLive) {
+    const pill = document.createElement('span');
+    pill.className = 'pill live';
+    pill.textContent = 'live';
+    left.appendChild(pill);
+  } else if (!data.has_final) {
+    const pill = document.createElement('span');
+    pill.className = 'pill';
+    pill.textContent = 'in progress';
+    left.appendChild(pill);
+  }
+  head.appendChild(left);
+
+  if (data.bible && data.bible.metric) {
+    const m = data.bible.metric;
+    const r = document.createElement('div');
+    r.className = 'loss';
+    r.innerHTML = `film_loss = <span class="v">${m.film_loss?.toFixed(4)}</span>`;
+    head.appendChild(r);
+  }
+  container.appendChild(head);
+
+  // Per-axis scores
+  if (data.bible && data.bible.metric && data.bible.metric.scores) {
+    const sc = document.createElement('div');
+    sc.className = 'scores';
+    for (const [k, v] of Object.entries(data.bible.metric.scores)) {
+      sc.innerHTML += `<span>${k} <b>${v.toFixed(3)}</b></span>`;
+    }
+    container.appendChild(sc);
+  }
+
+  // Carryover plan summary
+  if (data.bible && data.bible.carryover_from_parent) {
+    const co = data.bible.carryover_from_parent;
+    const flags = [];
+    for (const [k, v] of Object.entries(co)) {
+      if (k.startsWith('regen_') && v !== false && v !== null
+          && !(Array.isArray(v) && v.length === 0)) {
+        flags.push(`${k.replace('regen_','')}=${
+          v === 'all' ? 'all' :
+          Array.isArray(v) ? v.length : 'true'}`);
+      }
+    }
+    if (flags.length) {
+      const p = document.createElement('div');
+      p.className = 'plan';
+      p.textContent = `regen vs parent: ${flags.join(', ')}`;
+      container.appendChild(p);
+    }
+  }
+
+  // Script + storyboard summary card. Renders above cost so the user
+  // sees what was parsed at a glance — total scenes/shots/runtime
+  // plus per-scene breakdown. Only shown once script.json exists in
+  // the bible (i.e. after Stage 1 completes).
+  if (data.bible && data.bible.stages) {
+    const summary = renderSummary(data.bible.stages);
+    if (summary) container.appendChild(summary);
+  }
+
+  // Cost breakdown
+  if (data.cost && data.cost.n_calls > 0) {
+    container.appendChild(renderCost(data.cost));
+  }
+
+  if (!data.bible || !data.bible.stages) {
+    const note = document.createElement('div');
+    note.style.color = 'var(--muted)';
+    note.style.fontStyle = 'italic';
+    note.style.padding = '20px 0';
+    note.textContent = 'production_bible.json not yet written.';
+    container.appendChild(note);
+    detailHost.appendChild(container);
+    return;
+  }
+
+  const st = data.bible.stages;
+  const slug = data.book_slug;
+  const eid  = data.exp_id;
+  const mdl  = data.models_by_target || {};
+  const M = (relpath) => mdl[relpath] || '';
+
+  // Models legend — built from every model that produced a visible
+  // artifact in this experiment. Lives above the stage sections so
+  // the user can map badge → model name without hovering each thumb.
+  const legend = _buildModelsLegend(mdl);
+  if (legend) container.appendChild(legend);
+
+  // Lookbook style frame — open by default (it's the master reference)
+  if (st.lookbook && st.lookbook.style_frame) {
+    const p = st.lookbook.style_frame;
+    const s = makeStageSection('lookbook style frame', 1, true);
+    const grid = document.createElement('div');
+    grid.className = 'thumbs';
+    grid.appendChild(makeThumb(slug, eid, p, 'style_frame', false, M(p)));
+    s.body.appendChild(grid);
+    container.appendChild(s);
+  }
+
+  // Character refs — collapsed by default
+  if (st.references && st.references.by_scene_char) {
+    const refs = st.references.by_scene_char;
+    const keys = Object.keys(refs);
+    if (keys.length) {
+      const s = makeStageSection('character references', keys.length);
+      const grid = document.createElement('div');
+      grid.className = 'thumbs';
+      for (const k of keys.slice(0, 24))
+        grid.appendChild(makeThumb(slug, eid, refs[k], k, false, M(refs[k])));
+      s.body.appendChild(grid);
+      container.appendChild(s);
+    }
+  }
+
+  // Location moodboards — collapsed by default
+  if (st.locations && st.locations.moodboards) {
+    const mbs = st.locations.moodboards;
+    const keys = Object.keys(mbs);
+    if (keys.length) {
+      const s = makeStageSection('location moodboards', keys.length);
+      const grid = document.createElement('div');
+      grid.className = 'thumbs';
+      for (const k of keys)
+        grid.appendChild(makeThumb(slug, eid, mbs[k], k, false, M(mbs[k])));
+      s.body.appendChild(grid);
+      container.appendChild(s);
+    }
+  }
+
+  // Music cues — collapsed by default. Waveform thumbnail per cue.
+  if (st.music && st.music.by_scene) {
+    const m = st.music.by_scene;
+    const keys = Object.keys(m);
+    if (keys.length) {
+      const s = makeStageSection('music cues', keys.length);
+      const wrap = document.createElement('div');
+      wrap.className = 'audio-row';
+      for (const k of keys)
+        wrap.appendChild(makeAudioCard(slug, eid, m[k], k, M(m[k])));
+      s.body.appendChild(wrap);
+      container.appendChild(s);
+    }
+  }
+
+  // Narration — collapsed by default. Same waveform treatment.
+  if (st.narration && st.narration.by_scene) {
+    const n = st.narration.by_scene;
+    const keys = Object.keys(n);
+    if (keys.length) {
+      const s = makeStageSection('narration', keys.length);
+      const wrap = document.createElement('div');
+      wrap.className = 'audio-row';
+      for (const k of keys)
+        wrap.appendChild(makeAudioCard(slug, eid, n[k], k, M(n[k])));
+      s.body.appendChild(wrap);
+      container.appendChild(s);
+    }
+  }
+
+  // First frames — collapsed (lots of items)
+  if (st.frames && st.frames.by_scene_shot) {
+    const fr = st.frames.by_scene_shot;
+    const keys = Object.keys(fr);
+    if (keys.length) {
+      const s = makeStageSection('first frames', keys.length);
+      const grid = document.createElement('div');
+      grid.className = 'thumbs';
+      for (const k of keys.slice(0, 48))
+        grid.appendChild(makeThumb(slug, eid, fr[k], k, false, M(fr[k])));
+      s.body.appendChild(grid);
+      container.appendChild(s);
+    }
+  }
+
+  // Takes — collapsed
+  if (st.clips && st.clips.by_scene_shot_take) {
+    const cl = st.clips.by_scene_shot_take;
+    const keys = Object.keys(cl);
+    if (keys.length) {
+      const s = makeStageSection('takes', keys.length);
+      const grid = document.createElement('div');
+      grid.className = 'thumbs video';
+      for (const k of keys.slice(0, 24))
+        grid.appendChild(makeThumb(slug, eid, cl[k], k, true, M(cl[k])));
+      s.body.appendChild(grid);
+      container.appendChild(s);
+    }
+  }
+
+  // Final — open by default (the deliverable)
+  if (st.final && st.final.path) {
+    const s = makeStageSection('final.mp4', null, true);
+    const wrap = document.createElement('div');
+    wrap.className = 'thumb final-mp4';
+    const v = document.createElement('video');
+    v.src = artifactURL(slug, eid, st.final.path);
+    v.controls = true; v.preload = 'metadata';
+    wrap.appendChild(v);
+    s.body.appendChild(wrap);
+    container.appendChild(s);
+  }
+
+  detailHost.appendChild(container);
+}
+
+// ── Status bars + progress ──────────────────────────────────
+
+function setStatus(prefix, snap) {
+  const dot  = document.querySelector(`#${prefix}Status .dot`);
+  const text = $(`${prefix}StatusText`);
+  dot.className = 'dot ' + snap.status;
+  let txt = snap.status;
+  if (snap.is_running && snap.config && Object.keys(snap.config).length) {
+    const c = snap.config;
+    if (c.iterations) txt += ` · ${c.iterations} iter`;
+    if (c.category)   txt += ` · ${c.category}`;
+  }
+  if (snap.exit_code !== null && snap.exit_code !== undefined && !snap.is_running) {
+    txt += ` · exit ${snap.exit_code}`;
+  }
+  text.textContent = txt;
+}
+
+function renderStepper(progress) {
+  const stepper = $('stepper');
+  if (!progress || !progress.current_iteration) {
+    stepper.style.display = 'none';
+    return;
+  }
+  stepper.style.display = '';
+  const iterEl = $('stepperIter');
+  iterEl.innerHTML =
+    `iter <b>${progress.current_iteration}</b>/${progress.total_iterations || '?'}`
+    + (progress.current_exp ? ` · <b>${progress.current_exp}</b>` : '')
+    + (progress.last_film_loss != null
+       ? ` · last loss <b>${progress.last_film_loss.toFixed(4)}</b>` : '');
+
+  const stages = $('stages');
+  stages.innerHTML = '';
+  const completed = new Set(progress.completed_stages || []);
+  for (const s of pipelineStages) {
+    const pill = document.createElement('div');
+    pill.className = 'stage-pill';
+    if (completed.has(s.id))         pill.classList.add('done');
+    if (progress.current_stage === s.id) pill.classList.add('current');
+    pill.textContent = s.id === '1.5' || s.id === '6.5'
+      ? `${s.id}`
+      : (s.id === 'eval' || s.id === 'bible' ? s.label : `${s.id}`);
+    pill.title = `${s.id}: ${s.label}`;
+    stages.appendChild(pill);
+  }
+}
+
+function renderLogTail(elId, lines) {
+  const el = $(elId);
+  el.textContent = (lines || []).join('\n');
+  el.scrollTop = el.scrollHeight;
+}
+
+
+// ── Experiment dropdown ─────────────────────────────────────
+
+function rebuildDropdown(experiments) {
+  const dd = $('expDropdown');
+  const prev = dd.value;
+  dd.innerHTML = '';
+  const def = document.createElement('option');
+  def.value = '';
+  def.textContent = '— newest experiment —';
+  dd.appendChild(def);
+  for (const exp of experiments) {
+    const opt = document.createElement('option');
+    opt.value = exp.qualified;
+    let label = exp.qualified;
+    if (!exp.has_final)       label += '  · in progress';
+    else if (!exp.has_metric) label += '  · unscored';
+    opt.textContent = label;
+    dd.appendChild(opt);
+  }
+  if (prev && experiments.some(e => e.qualified === prev)) dd.value = prev;
+}
+
+async function loadExperimentDetail(qualified) {
+  if (!qualified) return null;
+  const [book, exp] = qualified.split('/');
+  try {
+    const r = await fetch(`/api/experiment/${encodeURIComponent(book)}/${encodeURIComponent(exp)}`);
+    if (!r.ok) return null;
+    return await r.json();
+  } catch { return null; }
+}
+
+function applyDefaultsFromConfig(rc) {
+  if (!rc) return;
+  if (rc.book_path)        $('bookPath').value        = rc.book_path;
+  if (rc.director)         $('director').value        = rc.director;
+  if (rc.cinematographer)  $('cinematographer').value = rc.cinematographer;
+  if (rc.iterations)       $('iterations').value      = rc.iterations;
+  if (rc.target_loss)      $('targetLoss').value      = rc.target_loss;
+  if (rc.threshold)        $('threshold').value       = rc.threshold;
+  if (rc.max_scenes)       $('maxScenes').value       = rc.max_scenes;
+  // Seed is intentionally NOT rehydrated: re-running with the same seed
+  // each time would defeat the variation we expect across runs. Leave
+  // it blank so the pipeline picks a fresh one unless the user types
+  // one in deliberately.
+}
+
+// ── Drag-drop PDF zone ──────────────────────────────────────
+
+function setupDropzone() {
+  const dz = $('bookDropzone');
+  const input = $('bookFile');
+  const clearBtn = $('bookClear');
+
+  function showFile(file) {
+    dz.classList.add('has-file');
+    dz.querySelector('.placeholder').innerHTML =
+      `<span class="filename">${file.name}</span> · ${(file.size/1048576).toFixed(2)} MB`;
+    clearBtn.style.display = '';
+    // Selecting a local file overrides any path.
+    $('bookPath').value = '';
+  }
+
+  function clearFile() {
+    input.value = '';
+    dz.classList.remove('has-file');
+    dz.querySelector('.placeholder').textContent =
+      'drag & drop a .pdf here, or click to browse';
+    clearBtn.style.display = 'none';
+  }
+
+  dz.addEventListener('click', (e) => {
+    if (e.target === clearBtn) return;
+    input.click();
+  });
+  input.addEventListener('change', () => {
+    if (input.files && input.files[0]) showFile(input.files[0]);
+  });
+  clearBtn.addEventListener('click', (e) => {
+    e.stopPropagation(); clearFile();
+  });
+
+  // Drag events
+  ['dragenter', 'dragover'].forEach(ev =>
+    dz.addEventListener(ev, e => {
+      e.preventDefault(); e.stopPropagation(); dz.classList.add('drag');
+    })
+  );
+  ['dragleave', 'dragend'].forEach(ev =>
+    dz.addEventListener(ev, e => {
+      e.preventDefault(); e.stopPropagation(); dz.classList.remove('drag');
+    })
+  );
+  dz.addEventListener('drop', e => {
+    e.preventDefault(); e.stopPropagation(); dz.classList.remove('drag');
+    const f = e.dataTransfer?.files?.[0];
+    if (!f) return;
+    if (!f.name.toLowerCase().endsWith('.pdf')) {
+      alert('Only .pdf files are accepted.');
+      return;
+    }
+    // Populate the hidden file input (DataTransfer trick)
+    const dt = new DataTransfer();
+    dt.items.add(f);
+    input.files = dt.files;
+    showFile(f);
+  });
+}
+
+// ── Polling loop ─────────────────────────────────────────────
+
+async function poll() {
+  try {
+    const r = await fetch('/api/state');
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+
+    pipelineStages = data.stages || [];
+    setStatus('run',   data.run);
+    setStatus('smoke', data.smoke);
+    renderLogTail('runLog',   data.run.log_tail);
+    renderLogTail('smokeLog', data.smoke.log_tail);
+    renderStepper(data.run.progress);
+
+    $('startBtn').style.display = data.run.is_running ? 'none' : '';
+    $('stopBtn').style.display  = data.run.is_running ? '' : 'none';
+
+    // First-load: populate form from persisted last-run config so the
+    // user doesn't re-type the book path. We only do this once and only
+    // when fields haven't already been filled by something else.
+    if (!appliedLastRun && data.last_run_config) {
+      appliedLastRun = true;
+      applyDefaultsFromConfig(data.last_run_config);
+    }
+
+    // Update dropdown if experiment list changed.
+    const newKeys = data.experiments.map(e => e.qualified).join('|');
+    const oldKeys = lastExperimentList.map(e => e.qualified).join('|');
+    if (newKeys !== oldKeys) {
+      lastExperimentList = data.experiments;
+      rebuildDropdown(data.experiments);
+    }
+
+    // Decide what to show in the main area and whether to live-refresh:
+    //
+    //   showKey: which experiment to render
+    //   isLive : true when the selected exp is the one currently being
+    //            written by produce.py — forces a re-fetch each poll so
+    //            new artifacts (frames, clips, audio) appear as they're
+    //            created on disk.
+    //
+    // Live mode triggers when the run is in progress AND the showKey
+    // matches the current exp — whether the user explicitly picked it
+    // from the dropdown or fell through to auto-follow.
+    let showKey = selectedExpKey;
+    if (!showKey) {
+      if (data.run.is_running && data.run.progress?.current_exp) {
+        showKey = data.run.progress.current_exp;
+      } else if (data.experiments.length) {
+        showKey = data.experiments[0].qualified;
+      }
+    }
+    const liveExp = data.run.is_running ? data.run.progress?.current_exp : null;
+    const isLive  = !!(liveExp && showKey === liveExp);
+
+    // Re-fetch when:
+    //   (a) the key changed (user picked something new), OR
+    //   (b) we're viewing the live exp (filesystem may have grown), OR
+    //   (c) the exp is fresh and the bible isn't yet written (give it
+    //       up to a few seconds to populate after the new dir appears).
+    const keyChanged = showKey !== currentlyShownKey;
+    if (showKey && (keyChanged || isLive)) {
+      const detail = await loadExperimentDetail(showKey);
+      if (detail) {
+        const fp = fingerprintDetail(detail);
+        // Always render on key change so videos for the new exp load.
+        // Otherwise only render when something visible actually grew —
+        // avoids tearing down the DOM (and resetting <video> playback)
+        // every 3s during a live run.
+        if (keyChanged || fp !== lastDetailFingerprint) {
+          renderExperimentDetail(detail, isLive);
+          lastDetailFingerprint = fp;
+        }
+      }
+      currentlyShownKey = showKey;
+    } else if (!showKey) {
+      $('mainArea').innerHTML = '<div class="empty">No experiments yet — start a run to populate this view.</div>';
+      currentlyShownKey = '';
+      lastDetailFingerprint = '';
+    }
+
+    $('meta').textContent =
+      `connected · ${data.experiments.length} experiment(s)`
+      + (data.run.is_running ? ' · running' : '');
+  } catch (e) {
+    $('meta').textContent = `disconnected (${e.message})`;
+  }
+}
+
+// ── Form / event handlers ────────────────────────────────────
+
+$('expDropdown').addEventListener('change', async (e) => {
+  selectedExpKey = e.target.value;
+  if (selectedExpKey) {
+    const detail = await loadExperimentDetail(selectedExpKey);
+    if (detail) {
+      renderExperimentDetail(detail, false);
+      applyDefaultsFromConfig(detail.run_config);
+    }
+  } else {
+    poll();   // re-trigger to show live or newest
+  }
+});
+
+$('runForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  // If the file dropzone has a file, it'll already be in fd as book_file.
+  $('startBtn').disabled = true;
+  try {
+    const r = await fetch('/api/start', { method: 'POST', body: fd });
+    const j = await r.json();
+    if (!r.ok) {
+      alert('Start failed: ' + (j.error || r.statusText));
+    } else {
+      // Switch to live view of the new run.
+      selectedExpKey = '';
+      $('expDropdown').value = '';
+    }
+  } catch (e) {
+    alert('Start failed: ' + e.message);
+  } finally {
+    $('startBtn').disabled = false;
+    poll();
+  }
+});
+
+$('stopBtn').addEventListener('click', async () => {
+  if (!confirm('Stop the running pipeline?')) return;
+  await fetch('/api/stop', { method: 'POST' });
+  poll();
+});
+
+$('smokeBtn').addEventListener('click', async () => {
+  const fd = new FormData();
+  fd.append('category', $('smokeCategory').value);
+  $('smokeBtn').disabled = true;
+  try {
+    const r = await fetch('/api/smoke-test', { method: 'POST', body: fd });
+    const j = await r.json();
+    if (!r.ok) alert('Smoke test failed: ' + (j.error || r.statusText));
+  } catch (e) {
+    alert('Smoke test failed: ' + e.message);
+  } finally {
+    $('smokeBtn').disabled = false;
+    poll();
+  }
+});
+
+setupDropzone();
+_initLightboxControls();
+poll();
+setInterval(poll, 3000);
+</script>
+
+</body>
+</html>
