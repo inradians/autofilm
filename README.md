@@ -10,7 +10,7 @@ The pipeline runs on the SOTA May-2026 stack, **consolidated through Runway**: a
 
 ## How it works
 
-End-to-end flow (pre-production through **`final.mp4`**, critic, and autoresearch loop). Source: [`docs/autofilm_pipeline_horizontal.svg`](docs/autofilm_pipeline_horizontal.svg).
+End-to-end flow (pre-production through **`final.mp4`**, critic, and autoresearch loop).
 
 ![Autofilm pipeline diagram: book PDF → parse → cast and locations → lookbook → storyboard → render → compile → final.mp4 → evaluate → carryover, looping back for the next iteration](docs/autofilm_pipeline_horizontal.svg)
 
