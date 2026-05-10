@@ -1588,6 +1588,18 @@ scene into 3-6 shots. For each shot specify:
     lens_mm, subject, action (terse, present tense), dialogue_excerpt
     (or empty), duration_seconds, composition_notes.
 
+DIALOGUE / NARRATION — MANDATORY when dialogue_excerpt is non-empty:
+  - speaker_id: the character_id of whoever speaks the line. Pull it
+    from the scene's `characters` list (or "narrator" for narration).
+    Required. Without this, the video model picks the wrong on-screen
+    character to lip-sync — visible mouth on the wrong face.
+  - is_narration: true ONLY when the line is voice-over by an unseen
+    narrator (NOT spoken by a visible character). Default false.
+    When true, NO character should lip-sync this line on camera —
+    the narrator is offscreen, riding over the visuals. Choose
+    dialogue_excerpts of in-scene type whenever possible; reserve
+    narration excerpts for shots where the V.O. anchors the visual.
+
 Duration guidance — HARD RULE:
   duration_seconds MUST be one of {4, 6, 8}. The video model's native
   single-call cap is 8 seconds; longer durations are not available.
@@ -1626,6 +1638,24 @@ SHOTLIST_TOOL_SCHEMA = {
                         "subject": {"type": "string"},
                         "action": {"type": "string"},
                         "dialogue_excerpt": {"type": "string"},
+                        "speaker_id": {
+                            "type": "string",
+                            "description": (
+                                "character_id of whoever speaks "
+                                "dialogue_excerpt. Use 'narrator' "
+                                "for V.O. narration. Required when "
+                                "dialogue_excerpt is non-empty."
+                            ),
+                        },
+                        "is_narration": {
+                            "type": "boolean",
+                            "description": (
+                                "True iff dialogue_excerpt is "
+                                "voice-over narration by an unseen "
+                                "narrator. When true, no on-screen "
+                                "character should lip-sync the line."
+                            ),
+                        },
                         "duration_seconds": {
                             "type": "integer",
                             "enum": [4, 6, 8],
@@ -1675,7 +1705,46 @@ def shot_list_for_scene(scene: dict) -> list[dict]:
 
 def build_storyboard(exp: Experiment, script: dict) -> dict:
     if exp.has("storyboard.json"):
-        return exp.read_json("storyboard.json")
+        cached = exp.read_json("storyboard.json")
+        # Auto-repair for storyboards from before speaker_id /
+        # is_narration were added. Without those, veo_prompt picks
+        # the wrong character to lip-sync (it defaults to the first
+        # character listed in the scene). Try a best-effort heuristic:
+        #   - 0 characters in the scene → it's V.O., set is_narration
+        #   - 1 character             → that's the speaker, fill it in
+        #   - 2+ characters           → ambiguous, leave blank + warn
+        scene_chars = {sc["id"]: sc.get("characters", []) for sc in script["scenes"]}
+        repaired = 0
+        ambiguous = 0
+        for sid, shots in cached.items():
+            chars = scene_chars.get(sid, [])
+            for shot in shots:
+                if not (shot.get("dialogue_excerpt") or "").strip():
+                    continue
+                if shot.get("speaker_id") or "is_narration" in shot:
+                    continue   # already populated by the new schema
+                if not chars:
+                    shot["speaker_id"]   = "narrator"
+                    shot["is_narration"] = True
+                    repaired += 1
+                elif len(chars) == 1:
+                    shot["speaker_id"]   = chars[0]
+                    shot["is_narration"] = False
+                    repaired += 1
+                else:
+                    # Multi-character scene with no speaker hint — this
+                    # one needs Claude to disambiguate. Mark and warn.
+                    ambiguous += 1
+        if repaired:
+            print(f"  ⚠ storyboard.json: auto-filled speaker_id for "
+                  f"{repaired} shot(s) (1-character scenes / V.O.)")
+            exp.write_json("storyboard.json", cached)
+        if ambiguous:
+            print(f"  ⚠ storyboard.json: {ambiguous} dialogue shot(s) in "
+                  f"multi-character scenes have no speaker_id — Veo will "
+                  f"fall back to the first listed character. Delete "
+                  f"storyboard.json to regenerate with explicit speakers.")
+        return cached
     storyboard: dict[str, list[dict]] = {}
     for scene in script["scenes"]:
         storyboard[scene["id"]] = shot_list_for_scene(scene)
@@ -1873,6 +1942,39 @@ def first_frame_prompt(lookbook: dict, shot: dict, scene: dict,
         for c, a in zip(chars_in_shot, actors_in_shot)
     ) or "  (no on-screen characters)"
     loc_text = location["description"][:300] if location else scene["location"]
+
+    # Speaker emphasis: if the shot has in-scene dialogue, surface the
+    # speaker so the still composition leads with that character —
+    # video models tend to lip-sync whoever's most visually prominent
+    # in the starting frame, so getting composition right here pays off
+    # downstream. For narration shots, suppress speaker emphasis: the
+    # narrator is unseen, no character should be presented as 'about
+    # to speak'.
+    speaker_block = ""
+    excerpt = (shot.get("dialogue_excerpt") or "").strip()
+    if excerpt and not shot.get("is_narration"):
+        speaker_id = shot.get("speaker_id") or ""
+        speaker_name = None
+        for c in chars_in_shot:
+            if c.get("id") == speaker_id or c.get("character_id") == speaker_id:
+                speaker_name = c["name"]
+                break
+        if speaker_name:
+            speaker_block = (
+                f"SPEAKER FOCUS: {speaker_name} is the one delivering the "
+                f"line in this shot — frame and light them as the dialogue "
+                f"subject; other characters react or listen.\n"
+            )
+    elif excerpt and shot.get("is_narration"):
+        # Narration: visually treat as an action/establishing beat. The
+        # voice-over rides over visuals; nobody on screen is "speaking".
+        speaker_block = (
+            f"VOICE-OVER SCENE: the line in dialogue_excerpt is "
+            f"voice-over by an unseen narrator — compose this as a "
+            f"clean action / establishing image; no character should "
+            f"be framed as if mid-speech.\n"
+        )
+
     return (
         style_preamble(lookbook)
         + f"PHOTOREALISTIC CINEMATIC FILM STILL.\n\n"
@@ -1882,6 +1984,7 @@ def first_frame_prompt(lookbook: dict, shot: dict, scene: dict,
         f"TIME: {scene.get('time_of_day', 'day')}\n\n"
         f"CHARACTERS:\n{char_lines}\n\n"
         f"ACTION: {shot['action']}\n"
+        f"{speaker_block}"
         f"COMPOSITION: {shot['composition_notes']}\n"
         f"MOOD: {scene.get('mood', '')}\n\n"
         f"NEGATIVE: no text, no logos, no UI, no watermarks, no illustration."
@@ -2050,16 +2153,60 @@ def veo_prompt(lookbook: dict, shot: dict, scene: dict,
                       for c, a in zip(chars_in_shot, actors_in_shot)]
         char_block = f"CHARACTERS: {', '.join(char_lines)}.\n"
 
+    # Dialogue / narration block. Two distinct cases the video model
+    # has to handle correctly:
+    #
+    #   1. In-scene dialogue: a visible character speaks. We need to
+    #      tell the model EXACTLY which character lip-syncs (using
+    #      shot.speaker_id, NOT chars_in_shot[0] — that picked the
+    #      wrong character whenever the scene had multiple people).
+    #
+    #   2. Voice-over narration: the line is spoken by an unseen
+    #      narrator riding OVER the visuals. No on-screen character
+    #      should lip-sync. The narration audio is added separately
+    #      in build_narration() — the video stage must keep mouths
+    #      shut on this shot or the cut will look like everyone is
+    #      mouthing the narrator's words.
     dialogue_block = ""
-    if shot.get("dialogue_excerpt"):
-        speaker = chars_in_shot[0]["name"] if chars_in_shot else "the character"
-        # Voice direction comes from the character's archetype, not from
-        # any real actor's voice. We omit the explicit "in X's voice"
-        # because the model would otherwise try to mimic a real person.
-        dialogue_block = (
-            f"DIALOGUE (synchronized native audio): "
-            f"{speaker}: \"{shot['dialogue_excerpt']}\"\n"
-        )
+    excerpt = (shot.get("dialogue_excerpt") or "").strip()
+    if excerpt:
+        is_narration = bool(shot.get("is_narration"))
+        speaker_id = shot.get("speaker_id") or ""
+
+        if is_narration or speaker_id == "narrator":
+            # Narrator is OFF-SCREEN. Tell Veo this is V.O. and
+            # instruct it explicitly NOT to lip-sync the line on
+            # any visible character. The narration audio comes from
+            # ElevenLabs in build_narration() and is mixed at compile
+            # time — the video here should be clean visuals only.
+            dialogue_block = (
+                f"VOICE-OVER (narrator unseen — DO NOT lip-sync "
+                f"this line on any visible character; characters "
+                f"on screen continue their action silently): "
+                f'"{excerpt}"\n'
+            )
+        else:
+            # Resolve speaker by id from the shot's character list.
+            # Falls back to first character only if no speaker_id was
+            # set (legacy storyboards) — and emits a fallback note so
+            # downstream debugging can spot the schema gap.
+            speaker = None
+            for c in chars_in_shot:
+                if c.get("id") == speaker_id or c.get("character_id") == speaker_id:
+                    speaker = c["name"]
+                    break
+            if speaker is None:
+                speaker = chars_in_shot[0]["name"] if chars_in_shot else "the character"
+            # Voice direction comes from the character's archetype, not
+            # from any real actor's voice. We omit the explicit "in X's
+            # voice" because the model would otherwise try to mimic a
+            # real person.
+            dialogue_block = (
+                f"DIALOGUE (synchronized native audio): "
+                f"ONLY {speaker} speaks and lip-syncs this line; "
+                f"all other characters on screen remain silent and "
+                f"do not move their mouths. {speaker}: \"{excerpt}\"\n"
+            )
 
     take_var = TAKE_VARIATIONS[take_index] if take_index < len(TAKE_VARIATIONS) else ""
 
