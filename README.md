@@ -112,7 +112,7 @@ Open Claude Code, Codex, Cursor, or your agent of choice in this repo (and disab
 | Per-shot video generation | `veo3.1_fast` | Runway | ~$15 |
 | Music score | Stable Audio 2.5 | Stability | ~$1 |
 | Ambient SFX (off by default) | `eleven_text_to_sound_v2` | Runway | ~$1 |
-| Long-video critic | Gemini 3 Pro | Google AI (optional) | ~$1 |
+| Long-video critic | Gemini 3 Pro | Google AI | ~$1 |
 | Stills critic | Claude Opus 4.7 | Anthropic | (rolled into Anthropic line) |
 | **per default experiment** | | | **~$27** |
 
