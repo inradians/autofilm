@@ -18,6 +18,8 @@ The repo deliberately has only three files that matter:
 
 By design, each experiment runs on a **fixed scene budget** (`MAX_SCENES=3` by default — about 12 shots, 90s of finished film). The metric is **`film_loss`**, the weighted sum of six 0-1 scores returned by a Gemini 3 Pro + Claude critic combo: cinematography, color, sound, acting, continuity, fidelity. Lower is better; the metric is independent of which knobs the agent changed, so architectural changes are fairly compared.
 
+![autofilm pipeline](docs/pipeline.svg)
+
 ## Quick start
 
 Install, API keys, book PDF, `check_setup.py`, and a cost-aware first `produce.py` / `evaluate.py` run are in **[SETUP.md](SETUP.md)** (sections 1–8). Optional browser UI (Flask): section **8b**.
