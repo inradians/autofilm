@@ -20,26 +20,66 @@ By design, each experiment runs on a **fixed scene budget** (`MAX_SCENES=3` by d
 
 ## Quick start
 
-**First time?** Read [`SETUP.md`](SETUP.md) — three keys, no approval delays, ~15 minutes to a green setup-check.
+Install, API keys, book PDF, `check_setup.py`, and a cost-aware first `produce.py` / `evaluate.py` run are in **[SETUP.md](SETUP.md)** (sections 1–8). Optional browser UI (Flask): section **8b**.
 
-Once you've completed setup:
+## Running a full job (CLI)
+
+Point the pipeline at one PDF via **`BOOK_PDF_PATH`** (in `.env` or exported in your shell). Other common env knobs: **`MAX_SCENES`** (default 3), **`DIRECTOR`** / **`CINEMATOGRAPHER`**, **`SEED`** (integer, reproducibility), **`FORCE_NEW=1`** (start a fresh `exp_NNN` instead of resuming).
+
+### One full pipeline pass (single experiment)
+
+[`produce.py`](produce.py) runs the full chain once—script through final mix—for the current or new experiment under `experiments/{book_slug}/exp_NNN/`. It resumes automatically if that directory already has partial artifacts.
 
 ```bash
-# Verify keys + ffmpeg + book pdf (well under a cent, ~10 sec)
-python scripts/check_setup.py
-
-# Run a cheap first experiment (~$5-7, ~10 min)
-MAX_SCENES=1 uv run produce.py
-
-# Score it (the bible PDF rebuilds with the critique section)
-uv run evaluate.py latest
-
-# Inspect (paths are now per-book: experiments/{book_slug}/exp_NNN/)
-open experiments/jurassic_park/exp_001/bible.pdf
-cat experiments/jurassic_park/exp_001/critique.md
+export BOOK_PDF_PATH=/absolute/path/to/book.pdf
+MAX_SCENES=3 uv run produce.py
 ```
 
-Once that loop confirms end-to-end, drop `MAX_SCENES=1` for the default 3-scene runs (~$27 each).
+That writes **`final.mp4`**, **`production_bible.json`**, and **`bible.pdf`**. To run the critic and refresh artifacts with **`metric.json`**, **`critique.md`**, and an updated bible:
+
+```bash
+uv run evaluate.py latest
+# or: uv run evaluate.py jurassic_park/exp_001
+```
+
+### Autoresearch loop (produce → evaluate → iterate)
+
+[`run_loop.py`](run_loop.py) runs the closed loop: full **`produce`** pass → **`evaluate_film`** → carryover plan → next **`exp_`** directory → repeat until a stop condition hits.
+
+```bash
+export BOOK_PDF_PATH=/absolute/path/to/book.pdf
+MAX_SCENES=3 uv run run_loop.py --iterations 5
+```
+
+Useful flags:
+
+| Flag | Meaning |
+|------|--------|
+| `--iterations N` | Cap on loop iterations (default 3) |
+| `--target 0.15` | Stop when `film_loss` ≤ this (default 0.15) |
+| `--threshold {low,medium,high}` | How aggressively to apply critic “changes” (default `medium`) |
+| `--resume` | Continue from the latest experiment instead of starting a new chain |
+| `--plateau` / `--plateau-window` | Stop when improvement stalls |
+
+Print a leaderboard of scored experiments and exit:
+
+```bash
+uv run run_loop.py --history
+```
+
+## Web UI server
+
+[`ui_server.py`](ui_server.py) is a small **Flask** app that configures a run in the browser and **starts the same autoresearch loop** as `run_loop.py` in a background subprocess (so the server stays responsive while logs stream). **Install Flask and launch the server** using **[SETUP.md](SETUP.md)** section **8b**.
+
+Default URL **`http://127.0.0.1:5174`** (override with **`AUTOFILM_UI_HOST`** / **`AUTOFILM_UI_PORT`**). In the UI you can:
+
+- Set a **server-local PDF path** or **upload** a book PDF (uploads land under `~/.autofilm/uploads/`).
+- Set **iterations**, **target loss**, critic **threshold**, **`max_scenes`**, optional **director / cinematographer**, **seed**, and optional **moodboard** images (saved under `experiments/{book_slug}/user_moodboards/` for the look book stage).
+- **Start** / **Stop** the loop (stop sends SIGTERM to the subprocess).
+- Run the **API smoke test** (`scripts/api_smoke_test.py`) before an expensive job.
+- Pick past experiments from the sidebar to reload saved **`run_config.json`** defaults.
+
+The UI polls **`/api/state`** for live log tail and parsed stage progress. For a one-off single render without the loop, use the CLI **`produce.py`** path above; the UI is aimed at multi-iteration **`run_loop.py`** jobs.
 
 ## Test books
 
@@ -90,8 +130,10 @@ Generated runs write under `experiments/{book_slug}/exp_NNN/`. That directory is
 ```
 prepare.py        — fixed scaffolding (do not modify)
 produce.py        — full pipeline + creative knobs (agent modifies this)
+run_loop.py       — autoresearch loop (produce → evaluate → carryover → repeat)
 evaluate.py       — runs the critic over a finished film
 bible.py          — generates a production-bible PDF for an experiment
+ui_server.py      — Flask UI; spawns run_loop.py with form-defined env/settings
 program.md        — agent instructions (human modifies this)
 SETUP.md          — first-time setup walkthrough (read this first)
 CHANGELOG.md      — migration history
@@ -142,28 +184,9 @@ experiments/
 - **Self-contained scaffolding.** No managed orchestration framework, no DAG library, no message bus. One sequential pipeline, one metric, one editable file.
 - **One billing surface for media.** Everything image/video/SFX runs through Runway credits. The agent doesn't have to reason about quota across four different vendor dashboards.
 
-## API keys
-
-Three required, one optional:
-
-1. **`ANTHROPIC_API_KEY`** — Claude Opus 4.7
-2. **`RUNWAYML_API_SECRET`** — image, video, and SFX
-3. **`STABILITY_API_KEY`** — Stable Audio 2.5
-4. **`GOOGLE_AI_API_KEY`** — *optional*, only for the long-video critic
-
-See [`SETUP.md`](SETUP.md) for the per-provider walkthrough.
-
 ## Optional creative direction
 
-You can name a real working director and/or cinematographer whose body of work should bias the look book:
-
-```bash
-DIRECTOR="..." CINEMATOGRAPHER="..." python produce.py
-```
-
-When set, the look book stage takes those names as input and asks Claude to derive concrete craft markers — typical lens package, lighting approach, palette, framing patterns, camera-movement vocabulary — and bake them into `lookbook.json`. The downstream Veo prompts use those derived markers (not the names themselves), and the bible cover shows the credits.
-
-Leave them unset for the pipeline's neutral cinematic baseline. The default `LOOKBOOK_GRADE` and `LOOKBOOK_STYLE_KEYWORDS` in `produce.py` already define a workable starting point.
+Optional **`DIRECTOR`** / **`CINEMATOGRAPHER`** env vars bias the look book toward a real filmmaker’s craft vocabulary (derived markers land in `lookbook.json` and credits on the bible cover). See **[SETUP.md](SETUP.md)** section **5**. Leave unset for the neutral baseline already defined by `LOOKBOOK_GRADE` / `LOOKBOOK_STYLE_KEYWORDS` in `produce.py`.
 
 ## Shot routing
 

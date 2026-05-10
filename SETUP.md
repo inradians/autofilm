@@ -234,6 +234,24 @@ uv run evaluate.py latest
 
 This refreshes the bible PDF with the critique section and writes `metric.json` with the `film_loss` score plus structured `changes` suggestions.
 
+## 8b. Web UI (optional)
+
+[`ui_server.py`](ui_server.py) serves a browser UI that configures and runs **`run_loop.py`** in the background (same subprocess you would start from the CLI). **Flask** is not installed by `uv sync`; add it once:
+
+```bash
+uv pip install flask
+```
+
+From the repo root:
+
+```bash
+uv run python ui_server.py
+```
+
+Default URL: **http://127.0.0.1:5174**. Override the bind address with **`AUTOFILM_UI_HOST`** and **`AUTOFILM_UI_PORT`**.
+
+Use the page to set a server-local book PDF path or upload a PDF, choose iteration count and target `film_loss`, optional director/cinematographer, moodboards, etc. **Start** launches the autoresearch loop; **Stop** sends SIGTERM. You can run the API smoke test from the UI before an expensive job. See the README **Web UI server** section for a feature-oriented overview.
+
 ## 9. Cost summary
 
 This is a self-funded weekend project — every dollar is yours. Two cost shapes worth budgeting against:
