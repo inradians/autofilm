@@ -27,6 +27,7 @@ import os
 import threading
 import time
 from concurrent.futures import ALL_COMPLETED, ThreadPoolExecutor, wait
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -577,6 +578,17 @@ def parse_script(exp: Experiment) -> dict:
         characters = list(by_id.values())
         scenes.extend(result.get("scenes", []))
 
+        # Early termination: once we have enough scenes to fill the
+        # configured budget AND have captured book metadata, stop
+        # paying Claude to parse chunks whose scenes we'd throw away
+        # at the truncation step below. For a 300-page book with
+        # MAX_SCENES=3, this routinely saves 10+ chunks of parsing.
+        if (MAX_SCENES
+                and len(scenes) >= MAX_SCENES
+                and book_title
+                and book_author):
+            break
+
     if MAX_SCENES:
         scenes = scenes[:MAX_SCENES]
 
@@ -878,6 +890,70 @@ def last_chain_model() -> str:
     cascade call ON THIS THREAD. Empty string if nothing yet."""
     return getattr(_last_chain_model, "value", "")
 
+
+# ── Structured API-event log ────────────────────────────────────────────────
+#
+# Each cascade stage prints a transient "✗ [model] context: error" line to
+# stdout, but those scroll away. For after-the-fact debugging — why did this
+# shot fall back to the third model in the chain? did a provider have a bad
+# day across the whole run? — we also append a structured record to
+# <exp>/api_events.jsonl. JSONL is append-only, naturally tail-able, and
+# parses cleanly without a header.
+#
+# The active experiment path is set by run() at the start of each pipeline
+# and stored in a thread-local so the cascade helpers (which never see
+# `exp` directly) can write to the right file. When unset (early bootstrap,
+# or tests that exercise cascades without a real exp), logging is a no-op.
+
+_active_exp_root = threading.local()
+
+
+def _set_active_exp(exp: "Experiment | None") -> None:
+    """Pin the active experiment root for api_events.jsonl writes on
+    this thread. Called once at the top of run()."""
+    _active_exp_root.value = exp.root if exp else None
+
+
+def _log_api_event(
+    *,
+    stage: str,
+    model: str,
+    context: str,
+    status: str,
+    error: str = "",
+) -> None:
+    """Append one structured event to <exp>/api_events.jsonl.
+
+    status is one of:
+        "ok"        — call succeeded (used by the cascade after a fallback)
+        "failed"    — provider raised; cascade will try the next model
+        "rejected"  — validation / 4xx error; cascade will try next model
+        "exhausted" — every model in the cascade failed; whole stage fails
+
+    `context` should locate the work in pipeline coordinates, e.g.
+    "s01/s01_sh01/take_1" for video, "ref/c0/s01" for character refs,
+    or "lookbook/style_frame" for one-off stage outputs."""
+    root = getattr(_active_exp_root, "value", None)
+    if root is None:
+        return                                 # bootstrap / test mode
+    event = {
+        "ts":      datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "stage":   stage,
+        "model":   model,
+        "context": context,
+        "status":  status,
+    }
+    if error:
+        # Keep error messages bounded — some provider tracebacks are
+        # 5+ KB and would bloat the log. The first 800 chars almost
+        # always capture the meaningful diagnostic.
+        event["error"] = error[:800]
+    try:
+        with (root / "api_events.jsonl").open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(event, ensure_ascii=False) + "\n")
+    except Exception:                                                # noqa: BLE001
+        pass   # never let logging failures derail the pipeline
+
 def _generate_video(
     prompt: str,
     first_frame: bytes,
@@ -956,6 +1032,8 @@ def _generate_video(
             result = fn()
             _tprint(f"    ✓ [{label}] {context} ({len(result)//1024}kB)")
             _publish_chain_model(label)
+            _log_api_event(stage="video", model=label,
+                           context=context, status="ok")
             return result
         except Exception as e:  # noqa: BLE001
             if _is_daily_limit(e):
@@ -974,11 +1052,43 @@ def _generate_video(
                 or "safety-filter block" in msg):
                 msg = "veo safety filter or null response; cascading"
             _tprint(f"    ✗ [{label}] {context}: {msg}")
+            _log_api_event(stage="video", model=label, context=context,
+                           status=_classify_api_error(msg), error=msg)
             last_exc = e
 
+    _log_api_event(stage="video", model="(cascade)", context=context,
+                   status="exhausted",
+                   error=str(last_exc) if last_exc else "")
     raise RuntimeError(
         f"All video models failed for {context}. Last: {last_exc}"
     )
+
+
+def _classify_api_error(msg: str) -> str:
+    """Bucket a provider exception message into 'rejected' vs 'failed'.
+
+    Rejections are provider-side validation / content / quota errors —
+    typically 4xx HTTP codes or words like 'safety', 'limit',
+    'validation', 'rejected' in the error body. Everything else
+    (timeouts, connection resets, 5xx, NoneType from null responses)
+    is a 'failed'. The cascade behavior is identical; the distinction
+    matters for log analysis only — e.g., a spike of 'rejected' from
+    one provider points at content policy or schema drift, while a
+    spike of 'failed' suggests an outage.
+    """
+    m = msg.lower()
+    # 4xx HTTP codes — match at word boundaries so both "Error: 400"
+    # and "422 Unprocessable" classify the same way.
+    if (any(code in msg for code in (" 400", " 401", " 403", " 422"))
+            or msg.startswith(("400", "401", "403", "422"))
+            or "validation" in m
+            or "rejected" in m
+            or "safety" in m
+            or "limit" in m
+            or "content policy" in m
+            or "moderation" in m):
+        return "rejected"
+    return "failed"
 
 
 def _generate_image_t2i(
@@ -1068,6 +1178,8 @@ def _generate_image_t2i(
             result = fn()
             _tprint(f"    ✓ [{label}] {context} ({len(result)//1024}kB)")
             _publish_chain_model(label)
+            _log_api_event(stage="t2i", model=label,
+                           context=context, status="ok")
             return result
         except Exception as e:  # noqa: BLE001
             if _is_daily_limit(e):
@@ -1081,8 +1193,13 @@ def _generate_image_t2i(
             if "moderation_blocked" in msg:
                 msg = "moderation_blocked (provider safety filter); cascading"
             _tprint(f"    ✗ [{label}] {context}: {msg}")
+            _log_api_event(stage="t2i", model=label, context=context,
+                           status=_classify_api_error(msg), error=msg)
             last_exc = e
 
+    _log_api_event(stage="t2i", model="(cascade)", context=context,
+                   status="exhausted",
+                   error=str(last_exc) if last_exc else "")
     raise RuntimeError(
         f"All t2i image models failed for {context}. Last: {last_exc}"
     )
@@ -1171,6 +1288,8 @@ def _generate_image_with_refs(
             result = fn()
             _tprint(f"    ✓ [{label}] {context} ({len(result)//1024}kB)")
             _publish_chain_model(label)
+            _log_api_event(stage="with_refs", model=label,
+                           context=context, status="ok")
             return result
         except Exception as e:  # noqa: BLE001
             if _is_daily_limit(e):
@@ -1182,8 +1301,13 @@ def _generate_image_with_refs(
             if "moderation_blocked" in msg:
                 msg = "moderation_blocked (provider safety filter); cascading"
             _tprint(f"    ✗ [{label}] {context}: {msg}")
+            _log_api_event(stage="with_refs", model=label, context=context,
+                           status=_classify_api_error(msg), error=msg)
             last_exc = e
 
+    _log_api_event(stage="with_refs", model="(cascade)", context=context,
+                   status="exhausted",
+                   error=str(last_exc) if last_exc else "")
     raise RuntimeError(
         f"All ref-aware image models failed for {context}. Last: {last_exc}"
     )
@@ -3066,6 +3190,11 @@ def compile_final(exp: Experiment, script: dict, storyboard: dict,
 
 def run(exp: Experiment) -> Path:
     """Execute the full pipeline. Returns path to final.mp4."""
+    # Pin this experiment's root so cascade helpers can append
+    # structured records to api_events.jsonl (model failures,
+    # rejections, exhausted cascades) for after-the-fact debugging.
+    _set_active_exp(exp)
+
     print(f"[{exp.exp_id}] Stage 1: parse script")
     script = parse_script(exp)
     print(f"  → {len(script['scenes'])} scenes, {len(script['characters'])} characters")

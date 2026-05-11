@@ -1,0 +1,22 @@
+{
+  "era": "Reconstruction-era American South, c. 1865–1875",
+  "genre": "Mythic historical folk drama / American tall-tale epic",
+  "tone": "Reverent, earthen, and elegiac — a folk ballad rendered as living scripture",
+  "lens_package": "Spherical primes on large-format digital (ARRI Alexa 65 or LF) to mimic the grain-and-grandeur of 65mm stock: Panavision Sphero 65 / DNA LF set — 24mm, 29mm, 35mm, 50mm, 75mm, 100mm. Lean heavily on the 35mm and 50mm for waist-up portraiture; reserve the 24mm for landscape vistas and the 100mm for compressed heat-haze montages. Minimal zooms. Glass chosen for gentle field curvature and warm uncoated flares from oil-lamp and lantern practicals.",
+  "lighting_style": "Almost entirely motivated, naturalistic sourcing. In the slave cabin, a single tallow-candle or hearth practical carries the key, supplemented by a soft bounce off unbleached muslin to lift shadow detail just enough to hold skin tone — high contrast ratios (8:1 or steeper), letting blacks fall fully black so faces emerge from the dark like daguerreotypes. Exteriors lean on hard, unfiltered sun at the shoulders of the day (first and last 90 minutes), with large negative fill (black solids) on the shadow side to sculpt cheekbones and forearm musculature against the haze. Sawmill and field montages use heavy atmosphere (cotton dust, sawdust, road clay kicked into shafts of backlight). Brush-arbor church is lit through the pine-bough roof — dappled God-light, fingers of sun through gaps, with warm fill bounced off the red clay road itself.",
+  "grade_description": "A warm, earth-pigment palette — oxblood reds, tobacco browns, longleaf-pine greens, and bone-white skies — printed with crushed shadows, creamy highlight rolloff, and a subtle silver-retention bite in the midtones so skin reads like worked leather and iron.",
+  "reference_films": [
+    "'12 Years a Slave' (2013), DP Sean Bobbitt — for unbroken handheld witness shots and candlelit interiors held at the edge of underexposure",
+    "'Days of Heaven' (1978), DP Néstor Almendros & Haskell Wexler — for magic-hour exteriors, wheat-and-field silhouettes, and motivated natural sourcing",
+    "'The Assassination of Jesse James by the Coward Robert Ford' (2007), DP Roger Deakins — for vignetted tintype-style portraiture, prairie wides, and the mythic stillness of locked-off Americana frames"
+  ],
+  "style_frame_prompt": "A 65mm anamorphic-aspect film still, 2.39:1, of a newborn Black infant cradled in the arms of a young mother seated on a low rope-strung bed inside a single-room hand-hewn pine-log slave cabin in Tidewater Virginia, 1865. The walls are chinked with red Virginia clay, the floor is packed earth, a patched tin roof overhead. A single tallow candle on a rough plank table is the only light source — its flame motivates a warm amber key on the mother's cheekbone and the baby's brow, falling off rapidly into deep, unlifted shadow that swallows the back of the cabin. Skin tones rendered rich and luminous, like a Gordon Parks portrait crossed with a Caravaggio chiaroscuro. Heavy atmosphere — woodsmoke and dust catching the candlelight in slow vertical drift. Composition is centered, symmetrical, with generous headroom and the candle flame placed on a lower third; shallow depth of field on a 50mm spherical prime at T2.0, focus on the infant's closed eyelids. Color palette: oxblood red clay, tobacco brown timber, bone-white linen swaddle, candle-amber highlight, ink-black negative space. Crushed shadows, creamy highlight rolloff, fine 65mm grain, a whisper of halation around the flame. Mythic, hushed, ominous — the opening frame of an American folk gospel.",
+  "style_keywords": [
+    "anamorphic",
+    "practical light",
+    "teal-and-orange grade",
+    "35mm grain",
+    "shallow depth of field"
+  ],
+  "ffmpeg_grade": "eq=contrast=1.08:saturation=0.92:gamma=0.97,colorbalance=rs=0.04:gs=0:bs=-0.06:rm=0:gm=0:bm=-0.02:rh=-0.04:gh=-0.02:bh=0.04"
+}

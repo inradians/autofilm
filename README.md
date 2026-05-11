@@ -83,6 +83,8 @@ uv run run_loop.py --history
 
 [`ui_server.py`](ui_server.py) is a small **Flask** app that configures a run in the browser and **starts the same autoresearch loop** as `run_loop.py` in a background subprocess (so the server stays responsive while logs stream). **Install Flask and launch the server** using **[SETUP.md](SETUP.md)** section **8b**.
 
+![autofilm UI server screenshot](docs/ui_server.png)
+
 Default URL **`http://127.0.0.1:5174`** (override with **`AUTOFILM_UI_HOST`** / **`AUTOFILM_UI_PORT`**). In the UI you can:
 
 - Set a **server-local PDF path** or **upload** a book PDF (uploads land under `~/.autofilm/uploads/`).

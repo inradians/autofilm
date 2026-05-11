@@ -1,0 +1,93 @@
+=== New experiment: jurassic_park/exp_001 (seed=839581) ===
+[exp_001] Stage 1: parse script
+=== New experiment: jurassic_park/exp_001 (seed=839581) ===
+[exp_001] Stage 1: parse script
+  → 1 scenes, 30 characters
+[exp_001] Stage 1.5: format screenplay
+  → 11 screenplay elements across 1 scenes
+[exp_001] Stage 2: cast + locations
+  Generating 1 moodboard(s) (parallel, MAX_WORKERS=4)...
+  [moodboard] 1/1
+    [nano_banana] generating moodboard for bahia_anasco_clinic...
+    ✓ nano_banana succeeded (1767kB)
+  → 31 cast rows, 1 locations
+[exp_001] Stage 3: lookbook
+  → grade: A desaturated tropical-night palette — slate blues and wet asphalt blacks pushed
+[exp_001] Stage 4: reference images
+  Generating 3 reference image(s) (parallel, MAX_WORKERS=4)...
+  ┌─ [reference] submitting 3 job(s) (MAX_WORKERS=4) ─────────────────
+    [photos] searching for Florence Pugh...
+    [photos] searching for Ben Schwartz...
+    [photos] searching for Tenoch Huerta...
+    [photos] search failed (https://duckduckgo.com/i.js?o=json&q=Tenoch+Huerta+actor+official+press+portrait+headshot&l=us-en&vqd=4-136785701893091755266606581188330640045&p=1&f=%2C%2C%2C%2C%2C 403 Ratelimit); continuing without web photos
+    [photos] fetched 0/3 photo(s) for Tenoch Huerta
+      [gpt_image] composition for manuel_aragon/s01_clinic_emergency...
+    [photos] search failed (https://duckduckgo.com/i.js?o=json&q=Ben+Schwartz+actor+official+press+portrait+headshot&l=us-en&vqd=4-332283770452689182672486998304220239171&p=1&f=%2C%2C%2C%2C%2C 403 Ratelimit); continuing without web photos
+    [photos] fetched 0/3 photo(s) for Ben Schwartz
+      [gpt_image] composition for ed_regis/s01_clinic_emergency...
+    [photos] search failed (https://duckduckgo.com/i.js?o=json&q=Florence+Pugh+actor+official+press+portrait+headshot&l=us-en&vqd=4-48139938923462146238001890695734266580&p=1&f=%2C%2C%2C%2C%2C 403 Ratelimit); continuing without web photos
+    [photos] fetched 0/3 photo(s) for Florence Pugh
+      [gpt_image] composition for bobbie_carter/s01_clinic_emergency...
+      ✓ gpt_image (9134kB)
+      [nano_banana] locking manuel_aragon/s01_clinic_emergency (2 refs)...
+      ✓ gpt_image (9789kB)
+      [nano_banana] locking bobbie_carter/s01_clinic_emergency (2 refs)...
+      ✓ nano_banana (1383kB)
+      ✗ gpt_image: Task failed
+      [gpt_image*] composition for ed_regis/s01_clinic_emergency...
+      ↻ rephrasing composition prompt for ed_regis/s01_clinic_emergency...
+      ✗ gpt_image*: name 'prompt' is not defined
+      [nano_banana*] composition for ed_regis/s01_clinic_emergency...
+      ↻ rephrasing composition prompt for ed_regis/s01_clinic_emergency...
+      ✗ nano_banana*: name 'prompt' is not defined
+      [nano_banana] composition for ed_regis/s01_clinic_emergency...
+      ✓ nano_banana (1416kB)
+      ✗ nano_banana: Task failed
+  ⚠ All reference image attempts exhausted for ed_regis/s01_clinic_emergency: All composition attempts failed for ed_regis/s01_clinic_emergency. Last: Task failed
+  └─ [reference] barrier cleared — ✓ all succeeded (3 job(s)) ────────────────
+[exp_001] Stage 5: shot list
+  → shot plan: 56s total, ~$8.40 estimated render cost
+  → 10 shots
+[exp_001] Stage 6: music
+  Generating 1 music cue(s) (parallel)...
+  [music] 1/1
+  Music s01_clinic_emergency failed: Missing API key: STABILITY_API_KEY. Copy .env.example to .env and set it.
+[exp_001] Stage 7: first frames
+  Generating 10 first frame(s) (parallel, MAX_WORKERS=4)...
+  ┌─ [first_frame] submitting 10 job(s) (MAX_WORKERS=4) ─────────────────
+  First frame s01_clinic_emergency/s01_sh03 failed: Task failed
+  First frame s01_clinic_emergency/s01_sh04 failed: Task failed
+  First frame s01_clinic_emergency/s01_sh07 failed: Task failed
+  └─ [first_frame] barrier cleared — ✓ all succeeded (10 job(s)) ────────────────
+[exp_001] Stage 8: video (1 take/shot)
+  s01_clinic_emergency/s01_sh01: routing → veo3.1_fast (6s, 1 segment(s))
+  s01_clinic_emergency/s01_sh02: routing → veo3.1_fast (4s, 1 segment(s))
+  s01_clinic_emergency/s01_sh05: routing → veo3.1_fast (6s, 1 segment(s))
+  s01_clinic_emergency/s01_sh06: routing → veo3.1_fast (6s, 1 segment(s))
+  s01_clinic_emergency/s01_sh08: routing → veo3.1_fast (8s, 1 segment(s))
+  s01_clinic_emergency/s01_sh09: routing → veo3.1_fast (4s, 1 segment(s))
+  s01_clinic_emergency/s01_sh10: routing → veo3.1_fast (8s, 1 segment(s))
+  Generating 7 take(s) (parallel, MAX_WORKERS=4)...
+  ┌─ [video_take] submitting 7 job(s) (MAX_WORKERS=4) ─────────────────
+  ✓ take s01_clinic_emergency/s01_sh01/1 (6553kB)
+  ✓ take s01_clinic_emergency/s01_sh02/1 (3228kB)
+  ✓ take s01_clinic_emergency/s01_sh08/1 (3705kB)
+  ✓ take s01_clinic_emergency/s01_sh05/1 (3123kB)
+  ✓ take s01_clinic_emergency/s01_sh09/1 (1914kB)
+  ✓ take s01_clinic_emergency/s01_sh06/1 (4334kB)
+  ✓ take s01_clinic_emergency/s01_sh10/1 (2978kB)
+  └─ [video_take] barrier cleared — ✓ all succeeded (7 job(s)) ────────────────
+[exp_001] Stage 9: edit decisions
+[exp_001] Stage 10: compile + grade + mix
+Moviepy - Building video /Users/camputer/Documents/Code/prj-autofilm/autofilm/experiments/jurassic_park/exp_001/final_pregrade.mp4.
+MoviePy - Writing audio in final_pregradeTEMP_MPY_wvf_snd.mp4
+MoviePy - Done.
+Moviepy - Writing video /Users/camputer/Documents/Code/prj-autofilm/autofilm/experiments/jurassic_park/exp_001/final_pregrade.mp4
+
+Moviepy - Done !
+Moviepy - video ready /Users/camputer/Documents/Code/prj-autofilm/autofilm/experiments/jurassic_park/exp_001/final_pregrade.mp4
+  → /Users/camputer/Documents/Code/prj-autofilm/autofilm/experiments/jurassic_park/exp_001/final.mp4
+
+Final film: /Users/camputer/Documents/Code/prj-autofilm/autofilm/experiments/jurassic_park/exp_001/final.mp4
+Production bible: /Users/camputer/Documents/Code/prj-autofilm/autofilm/experiments/jurassic_park/exp_001/bible.pdf  (68.8 MB)
+Next: `python evaluate.py exp_001` to score it, then `python bible.py exp_001` to refresh the bible.

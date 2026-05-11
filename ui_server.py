@@ -439,6 +439,30 @@ def api_experiment(book_slug: str, exp_id: str) -> Any:
     except Exception:                                              # noqa: BLE001
         out["models_by_target"] = {}
 
+    # Model API events (failures, rejections, exhausted cascades).
+    # produce.py appends one JSONL record per cascade attempt — see
+    # _log_api_event() — so the user can see after the fact which
+    # providers rejected requests and where the cascade had to fall
+    # back. The UI renders a summary count + a clickable details
+    # panel keyed off this list.
+    try:
+        events_path = exp_root / "api_events.jsonl"
+        if events_path.exists():
+            events: list[dict] = []
+            for line in events_path.read_text().splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    events.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+            # Keep most-recent first so the UI doesn't have to reverse.
+            events.reverse()
+            out["api_events"] = events
+    except Exception:                                              # noqa: BLE001
+        out["api_events"] = []
+
     return jsonify(out)
 
 

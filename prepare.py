@@ -1941,13 +1941,19 @@ RUNWAY_TTS_MODEL = "eleven_multilingual_v2"
 # list of currently-supported presets, send any wrong value to /v1/
 # text_to_speech and Runway returns the enum in the error body.
 RUNWAY_VOICE_IDS: dict[str, str] = {
-    "rachel":    "Rachel",   # warm female narrator
-    "george":    "Bernard",  # mature male narrator
-    "antoni":    "Mark",     # clear male narrator
-    "bella":     "Maya",     # soft female
-    "sam":       "Tom",      # neutral male
+    "rachel":     "Rachel",   # warm female narrator
+    "george":     "Bernard",  # mature male — wise British elder; ElevenLabs maps to "George" (JBFqnCBsd6RMkjVDRZzb)
+    "wise_elder": "Bernard",  # semantic alias for the same voice — readable default
+    "antoni":     "Mark",     # clear male narrator
+    "bella":      "Maya",     # soft female
+    "sam":        "Tom",      # neutral male
 }
-DEFAULT_NARRATION_VOICE = "rachel"
+# Default narrator: a wise elderly man. Bernard on Runway maps to
+# ElevenLabs' "George" voice — measured, weathered, with the gravitas
+# the autoresearch loop's omniscient narrator wants. Override via the
+# voice_hint field on a script's narration element if a scene needs a
+# different character voicing the V.O.
+DEFAULT_NARRATION_VOICE = "wise_elder"
 
 
 # FLUX model strings.

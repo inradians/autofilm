@@ -1,0 +1,455 @@
+{
+  "location_moodboards/virginia_slave_cabin/00.png": {
+    "model": "gemini_image3_pro",
+    "prompt": "Cinematic empty-scene location reference photograph, no people. Inspired by surviving antebellum slave quarters in Tidewater Virginia — a single-room dwelling of hand-hewn pine logs chinked with red clay, a packed dirt floor, and a tin roof patched with flattened cans. A lone kerosene lantern is the only light source, throwing a tight amber pool over a straw-tick mattress while the corners drown in tar-black shadow; rain on tin provides a percussive, almost heartbeat ambience. Surfaces are tactile and rough: splintered rafters hung with drying herbs, a soot-blackened hearth, coarse linen sheets gone gray from lye washing, a tin basin beaded with sweat-water. The palette is candle-amber, ink-black, ember-red, wet-pine brown. Camera-friendly notes: tight, low-ceilinged interior favors close lenses (28–40mm) and chiaroscuro one-light setups; practicals can motivate every beat, and the dark beyond the doorway reads as a pure black void for mythic silhouettes. Lightning flashes outside can punch quick blue counter-key without breaking the lantern world.. Palette: lantern amber, tar black, ember red, wet-pine brown. Anamorphic, photorealistic, no text/logos.",
+    "meta": {
+      "stage": "moodboard"
+    }
+  },
+  "location_moodboards/fields_mills_road_montage/00.png": {
+    "model": "gemini_image3_pro",
+    "prompt": "Cinematic empty-scene location reference photograph, no people. A composite Reconstruction-era Southern landscape drawn from Piedmont cotton country, Carolina pine sawmills, and the rutted clay roads that fed the C&O rail expansion. Light is wide and unforgiving: a high, bleaching noon sun over the cotton rows, then dust-filtered God-rays slanting through a sawmill's open-sided shed, finally a hazy late-afternoon orange where coal smoke from distant camps smudges the horizon. Materials shift across the montage — cotton bolls like dirty popcorn, hand-split cypress shingles, rough oak axe handles polished by palm sweat, a rusted cider barrel sweating sap, the iron-and-coal grit of the road. The palette runs sun-bleached white, cotton-cream, sawdust-gold, iron-rust, distant-smoke blue. Camera-friendly notes: built for sweeping wides and long-lens heat-shimmer compressions; a slow dolly past sawmill blades, backlit dust, and a hero crossroads tableau with John Henry centered against converging horizons make natural montage punctuation. Wind in the cotton and floating sawdust give every frame organic motion.. Palette: sun-bleached white, sawdust gold, iron rust, smoke blue. Anamorphic, photorealistic, no text/logos.",
+    "meta": {
+      "stage": "moodboard"
+    }
+  },
+  "location_moodboards/brush_arbor_and_red_road/00.png": {
+    "model": "gemini_image3_pro",
+    "prompt": "Cinematic empty-scene location reference photograph, no people. Modeled on the brush-arbor and pine-board praise houses of the post-Emancipation Carolinas — an open-sided shelter of rough pine slats and a roof of fresh-cut pine boughs, set in a longleaf clearing off a clay road the color of dried blood. Light is the hero: hard Sunday-noon sun slices between board gaps in clean parallel blades, raking the swaying congregation with stripes of gold and shadow and lighting suspended motes of pollen and dust. Surfaces smell as much as they look — turpentine weeping from green pine, sweat-darkened hat brims, hymnal paper soft as cloth, hand-stitched yellow kerchief, the iron hinge of a weather-silvered gate. Outside, the red dirt road glows terracotta between walls of loblolly pine whose long late shadows stripe the lovers as they walk. Palette: pine-sap gold, kerchief yellow, clay red, shadow indigo, Sunday white. Camera-friendly notes: the slatted walls are a natural cucoloris for in-camera god-rays; shoot the duet in matched singles with shallow depth to braid the voices visually, then transition to a wide two-shot on the road using the pine-shadow bars as a built-in rhythm track. Golden hour on the clay road needs almost no augmentation.. Palette: pine-sap gold, clay red, kerchief yellow, shadow indigo, Sunday white. Anamorphic, photorealistic, no text/logos.",
+    "meta": {
+      "stage": "moodboard"
+    }
+  },
+  "lookbook/style_frame.png": {
+    "model": "gpt_image_2",
+    "prompt": "A 65mm anamorphic-aspect film still, 2.39:1, of a newborn Black infant cradled in the arms of a young mother seated on a low rope-strung bed inside a single-room hand-hewn pine-log slave cabin in Tidewater Virginia, 1865. The walls are chinked with red Virginia clay, the floor is packed earth, a patched tin roof overhead. A single tallow candle on a rough plank table is the only light source — its flame motivates a warm amber key on the mother's cheekbone and the baby's brow, falling off rapidly into deep, unlifted shadow that swallows the back of the cabin. Skin tones rendered rich and luminous, like a Gordon Parks portrait crossed with a Caravaggio chiaroscuro. Heavy atmosphere — woodsmoke and dust catching the candlelight in slow vertical drift. Composition is centered, symmetrical, with generous headroom and the candle flame placed on a lower third; shallow depth of field on a 50mm spherical prime at T2.0, focus on the infant's closed eyelids. Color palette: oxblood red clay, tobacco brown timber, bone-white linen swaddle, candle-amber highlight, ink-black negative space. Crushed shadows, creamy highlight rolloff, fine 65mm grain, a whisper of halation around the flame. Mythic, hushed, ominous — the opening frame of an American folk gospel.",
+    "meta": {
+      "stage": "style_frame",
+      "size": "1792x1024",
+      "quality": "high"
+    }
+  },
+  "references/john_henrys_mother/s01_birth.png": {
+    "model": "gpt_image_2",
+    "prompt": "Photorealistic cinematic film still. anamorphic, practical light, teal-and-orange grade, 35mm grain, shallow depth of field. Anamorphic 16:9, shallow depth of field.\n\nSUBJECT: John Henry's mother — An enslaved woman who has known the long road between Virginia plantations; holds the newborn legend in her arms by firelight.\nSCENE: Small slave cabin, Virginia, Black night. Mood: Mythic, hushed, ominous.\n\nNEGATIVE: no text, no logos, no watermarks, no UI.",
+    "meta": {
+      "stage": "reference",
+      "character": "john_henrys_mother",
+      "scene": "s01_birth"
+    }
+  },
+  "references/john_henry/s01_birth.png": {
+    "model": "gpt_image_2",
+    "prompt": "Photorealistic cinematic film still. anamorphic, practical light, teal-and-orange grade, 35mm grain, shallow depth of field. Anamorphic 16:9, shallow depth of field.\n\nSUBJECT: John Henry — Towering, broad-chested Black steel driver born on a Virginia plantation in the 1840s; calm-eyed, quiet, with skillet-sized hands. After Emancipation he follows the railroad camps, becomes the legendary hammer-swinger at Big Bend Tunnel.\nSCENE: Small slave cabin, Virginia, Black night. Mood: Mythic, hushed, ominous.\n\nNEGATIVE: no text, no logos, no watermarks, no UI.",
+    "meta": {
+      "stage": "reference",
+      "character": "john_henry",
+      "scene": "s01_birth"
+    }
+  },
+  "references/john_henry/s02_growing_up.png": {
+    "model": "gpt_image_2",
+    "prompt": "Photorealistic cinematic film still. anamorphic, practical light, teal-and-orange grade, 35mm grain, shallow depth of field. Anamorphic 16:9, shallow depth of field.\n\nSUBJECT: John Henry — Towering, broad-chested Black steel driver born on a Virginia plantation in the 1840s; calm-eyed, quiet, with skillet-sized hands. After Emancipation he follows the railroad camps, becomes the legendary hammer-swinger at Big Bend Tunnel.\nSCENE: Cotton fields, sawmills, and the road to the railroad camps, Years passing. Mood: Rising, determined, foreshadowing.\n\nNEGATIVE: no text, no logos, no watermarks, no UI.",
+    "meta": {
+      "stage": "reference",
+      "character": "john_henry",
+      "scene": "s02_growing_up"
+    }
+  },
+  "references/midwife/s01_birth.png": {
+    "model": "gpt_image_2",
+    "prompt": "Photorealistic cinematic film still. anamorphic, practical light, teal-and-orange grade, 35mm grain, shallow depth of field. Anamorphic 16:9, shallow depth of field.\n\nSUBJECT: The midwife — Wipes her hands on her apron in the small cabin where John Henry is born.\nSCENE: Small slave cabin, Virginia, Black night. Mood: Mythic, hushed, ominous.\n\nNEGATIVE: no text, no logos, no watermarks, no UI.",
+    "meta": {
+      "stage": "reference",
+      "character": "midwife",
+      "scene": "s01_birth"
+    }
+  },
+  "references/john_henry/s03_brush_arbor.png": {
+    "model": "gpt_image_2",
+    "prompt": "Photorealistic cinematic film still. anamorphic, practical light, teal-and-orange grade, 35mm grain, shallow depth of field. Anamorphic 16:9, shallow depth of field.\n\nSUBJECT: John Henry — Towering, broad-chested Black steel driver born on a Virginia plantation in the 1840s; calm-eyed, quiet, with skillet-sized hands. After Emancipation he follows the railroad camps, becomes the legendary hammer-swinger at Big Bend Tunnel.\nSCENE: Brush-arbor church and red dirt road, the Carolinas, Hot Sunday. Mood: Warm, tender, fated.\n\nNEGATIVE: no text, no logos, no watermarks, no UI.",
+    "meta": {
+      "stage": "reference",
+      "character": "john_henry",
+      "scene": "s03_brush_arbor"
+    }
+  },
+  "references/polly_ann/s03_brush_arbor.png": {
+    "model": "gpt_image_2",
+    "prompt": "Photorealistic cinematic film still. anamorphic, practical light, teal-and-orange grade, 35mm grain, shallow depth of field. Anamorphic 16:9, shallow depth of field.\n\nSUBJECT: Polly Ann — John Henry's small, fierce wife with a yellow kerchief, a laugh that fills clearings and a temper that empties them. Mother, singer, and steel driver in her own right.\nSCENE: Brush-arbor church and red dirt road, the Carolinas, Hot Sunday. Mood: Warm, tender, fated.\n\nNEGATIVE: no text, no logos, no watermarks, no UI.",
+    "meta": {
+      "stage": "reference",
+      "character": "polly_ann",
+      "scene": "s03_brush_arbor"
+    }
+  },
+  "music/s01_birth.wav": {
+    "model": "stable-audio-2.5",
+    "prompt": "orchestral cinematic score, sweeping strings and low brass, restrained, building tension, no vocals. Scene mood: Mythic, hushed, ominous. On a black night in the 1840s, John Henry is born in a low Virginia cabin. Broad-chested, old-eyed, the infant reaches up and — so legend says — proph",
+    "meta": {
+      "stage": "music",
+      "scene": "s01_birth",
+      "duration_seconds": 42
+    }
+  },
+  "music/s02_growing_up.wav": {
+    "model": "stable-audio-2.5",
+    "prompt": "orchestral cinematic score, sweeping strings and low brass, restrained, building tension, no vocals. Scene mood: Rising, determined, foreshadowing. John Henry grows like an unshaded hickory — lifting cider barrels at twelve, outworking grown men at sixteen. After Emancipation he chooses the railro",
+    "meta": {
+      "stage": "music",
+      "scene": "s02_growing_up",
+      "duration_seconds": 46
+    }
+  },
+  "music/s03_brush_arbor.wav": {
+    "model": "stable-audio-2.5",
+    "prompt": "orchestral cinematic score, sweeping strings and low brass, restrained, building tension, no vocals. Scene mood: Warm, tender, fated. In a pine-board church smelling of turpentine, John Henry's deep voice answers Polly Ann's singing. He walks her home along a red dirt road in near-si",
+    "meta": {
+      "stage": "music",
+      "scene": "s03_brush_arbor",
+      "duration_seconds": 47
+    }
+  },
+  "narration/s01_birth.mp3": {
+    "model": "eleven_multilingual_v2",
+    "prompt": "They say he came on the blackest night the county ever saw — a night so dark the stars themselves stepped back to watch.",
+    "meta": {
+      "stage": "narration",
+      "scene": "s01_birth",
+      "voice_id": "Bernard"
+    }
+  },
+  "narration/s02_growing_up.mp3": {
+    "model": "eleven_multilingual_v2",
+    "prompt": "He grew like an unshaded hickory — straight, hard, reaching for sky no one had promised him. Something inside me said stop, boy. Rest. But a dollar and a quarter a day don't whisper — it hollers.",
+    "meta": {
+      "stage": "narration",
+      "scene": "s02_growing_up",
+      "voice_id": "Bernard"
+    }
+  },
+  "frames/s01_birth/s01_sh01.composition.png": {
+    "model": "gpt_image",
+    "prompt": "VISUAL STYLE: anamorphic, practical light, teal-and-orange grade, 35mm grain, shallow depth of field.\nLENS: Spherical primes on large-format digital (ARRI Alexa 65 or LF) to mimic the grain-and-grandeur of 65mm stock: Panavision Sphero 65 / DNA LF set — 24mm, 29mm, 35mm, 50mm, 75mm, 100mm. Lean heavily on the 35mm and 50mm for waist-up portraiture; reserve the 24mm for landscape vistas and the 100mm for compressed heat-haze montages. Minimal zooms. Glass chosen for gentle field curvature and warm uncoated flares from oil-lamp and lantern practicals..\nGRADE: A warm, earth-pigment palette — oxblood reds, tobacco browns, longleaf-pine greens, and bone-white skies — printed with crushed shadows, creamy highlight rolloff, and a subtle silver-retention bite in the midtones so skin reads like worked leather and iron..\n\nPHOTOREALISTIC CINEMATIC FILM STILL.\n\nSHOT: XLS (low wide exterior angle), ~24mm lens.\nCAMERA: starts slow push-in.\n\nLOCATION: Small slave cabin, Virginia. Inspired by surviving antebellum slave quarters in Tidewater Virginia — a single-room dwelling of hand-hewn pine logs chinked with red clay, a packed dirt floor, and a tin roof patched with flattened cans. A lone kerosene lantern is the only light source, throwing a tight amber pool over a straw-tic\nTIME: Black night\n\nCHARACTERS:\n  - John Henry — monumental Black laborer in his early thirties, granite-jawed, quietly thunderous. Towering, broad-chested Black steel driver born on a Virginia plantation in the 1840s; calm-eyed, quiet, with skillet-sized hands. After Emancipation he follows the railroad camps, becomes the legendary hammer-swinger at Big Bend Tunnel.\n  - John Henry's mother — slender Black woman in her early twenties, firelit, tender but iron-spined. An enslaved woman who has known the long road between Virginia plantations; holds the newborn legend in her arms by firelight.\n  - The midwife — stout Black elder woman in her sixties, apron-creased, unflappable register. Wipes her hands on her apron in the small cabin where John Henry is born.\n\nACTION: Rain streaks across a low Virginia cabin; a single lantern glows in one window. Sky is ink-black, no stars.\nVOICE-OVER SCENE: the line in dialogue_excerpt is voice-over by an unseen narrator — compose this as a clean action / establishing image; no character should be framed as if mid-speech.\nCOMPOSITION: Cabin small in lower third, vast black sky dominating frame. Lantern is the only warm point of light. Mythic scale.\nMOOD: Mythic, hushed, ominous\n\nNEGATIVE: no text, no logos, no UI, no watermarks, no illustration.",
+    "meta": {
+      "stage": "first_frame_composition",
+      "scene": "s01_birth",
+      "shot": "s01_sh01"
+    }
+  },
+  "frames/s01_birth/s01_sh02.composition.png": {
+    "model": "gpt_image",
+    "prompt": "VISUAL STYLE: anamorphic, practical light, teal-and-orange grade, 35mm grain, shallow depth of field.\nLENS: Spherical primes on large-format digital (ARRI Alexa 65 or LF) to mimic the grain-and-grandeur of 65mm stock: Panavision Sphero 65 / DNA LF set — 24mm, 29mm, 35mm, 50mm, 75mm, 100mm. Lean heavily on the 35mm and 50mm for waist-up portraiture; reserve the 24mm for landscape vistas and the 100mm for compressed heat-haze montages. Minimal zooms. Glass chosen for gentle field curvature and warm uncoated flares from oil-lamp and lantern practicals..\nGRADE: A warm, earth-pigment palette — oxblood reds, tobacco browns, longleaf-pine greens, and bone-white skies — printed with crushed shadows, creamy highlight rolloff, and a subtle silver-retention bite in the midtones so skin reads like worked leather and iron..\n\nPHOTOREALISTIC CINEMATIC FILM STILL.\n\nSHOT: MS (low, slightly canted angle), ~35mm lens.\nCAMERA: starts static, lantern flicker.\n\nLOCATION: Small slave cabin, Virginia. Inspired by surviving antebellum slave quarters in Tidewater Virginia — a single-room dwelling of hand-hewn pine logs chinked with red clay, a packed dirt floor, and a tin roof patched with flattened cans. A lone kerosene lantern is the only light source, throwing a tight amber pool over a straw-tic\nTIME: Black night\n\nCHARACTERS:\n  - John Henry — monumental Black laborer in his early thirties, granite-jawed, quietly thunderous. Towering, broad-chested Black steel driver born on a Virginia plantation in the 1840s; calm-eyed, quiet, with skillet-sized hands. After Emancipation he follows the railroad camps, becomes the legendary hammer-swinger at Big Bend Tunnel.\n  - John Henry's mother — slender Black woman in her early twenties, firelit, tender but iron-spined. An enslaved woman who has known the long road between Virginia plantations; holds the newborn legend in her arms by firelight.\n  - The midwife — stout Black elder woman in her sixties, apron-creased, unflappable register. Wipes her hands on her apron in the small cabin where John Henry is born.\n\nACTION: Midwife bends over the straw mattress, sleeves rolled. Mother grips the bedpost, sweat-slick, jaw clenched against a contraction.\nCOMPOSITION: Single lantern key from frame-left carves deep shadows. Tin-roof rain texture audible. Earthy, Caravaggio palette.\nMOOD: Mythic, hushed, ominous\n\nNEGATIVE: no text, no logos, no UI, no watermarks, no illustration.",
+    "meta": {
+      "stage": "first_frame_composition",
+      "scene": "s01_birth",
+      "shot": "s01_sh02"
+    }
+  },
+  "frames/s01_birth/s01_sh02.png": {
+    "model": "gen4_image",
+    "prompt": "Photorealistic cinematic film still. anamorphic, practical light, teal-and-orange grade, 35mm grain, shallow depth of. Anamorphic 16:9.\nSHOT: MS low, slightly canted angle, 35mm.\nLOCATION: Small slave cabin, Virginia, Black night.\nCHARACTERS: John Henry; John Henry's mother; The midwife\nACTION: Midwife bends over the straw mattress, sleeves rolled. Mother grips the bedpost, sweat-slick, jaw clenched against a contraction.\nMOOD: Mythic, hushed, ominous\nNEGATIVE: no text, no logos, no watermarks.",
+    "meta": {
+      "stage": "first_frame",
+      "scene": "s01_birth",
+      "shot": "s01_sh02"
+    }
+  },
+  "frames/s01_birth/s01_sh01.png": {
+    "model": "gen4_image",
+    "prompt": "Photorealistic cinematic film still. anamorphic, practical light, teal-and-orange grade, 35mm grain, shallow depth of. Anamorphic 16:9.\nSHOT: XLS low wide exterior angle, 24mm.\nLOCATION: Small slave cabin, Virginia, Black night.\nCHARACTERS: John Henry; John Henry's mother; The midwife\nACTION: Rain streaks across a low Virginia cabin; a single lantern glows in one window. Sky is ink-black, no stars.\nMOOD: Mythic, hushed, ominous\nNEGATIVE: no text, no logos, no watermarks.",
+    "meta": {
+      "stage": "first_frame",
+      "scene": "s01_birth",
+      "shot": "s01_sh01"
+    }
+  },
+  "frames/s01_birth/s01_sh03.composition.png": {
+    "model": "gpt_image",
+    "prompt": "VISUAL STYLE: anamorphic, practical light, teal-and-orange grade, 35mm grain, shallow depth of field.\nLENS: Spherical primes on large-format digital (ARRI Alexa 65 or LF) to mimic the grain-and-grandeur of 65mm stock: Panavision Sphero 65 / DNA LF set — 24mm, 29mm, 35mm, 50mm, 75mm, 100mm. Lean heavily on the 35mm and 50mm for waist-up portraiture; reserve the 24mm for landscape vistas and the 100mm for compressed heat-haze montages. Minimal zooms. Glass chosen for gentle field curvature and warm uncoated flares from oil-lamp and lantern practicals..\nGRADE: A warm, earth-pigment palette — oxblood reds, tobacco browns, longleaf-pine greens, and bone-white skies — printed with crushed shadows, creamy highlight rolloff, and a subtle silver-retention bite in the midtones so skin reads like worked leather and iron..\n\nPHOTOREALISTIC CINEMATIC FILM STILL.\n\nSHOT: CU (side profile angle), ~50mm lens.\nCAMERA: starts subtle handheld.\n\nLOCATION: Small slave cabin, Virginia. Inspired by surviving antebellum slave quarters in Tidewater Virginia — a single-room dwelling of hand-hewn pine logs chinked with red clay, a packed dirt floor, and a tin roof patched with flattened cans. A lone kerosene lantern is the only light source, throwing a tight amber pool over a straw-tic\nTIME: Black night\n\nCHARACTERS:\n  - John Henry — monumental Black laborer in his early thirties, granite-jawed, quietly thunderous. Towering, broad-chested Black steel driver born on a Virginia plantation in the 1840s; calm-eyed, quiet, with skillet-sized hands. After Emancipation he follows the railroad camps, becomes the legendary hammer-swinger at Big Bend Tunnel.\n  - John Henry's mother — slender Black woman in her early twenties, firelit, tender but iron-spined. An enslaved woman who has known the long road between Virginia plantations; holds the newborn legend in her arms by firelight.\n  - The midwife — stout Black elder woman in her sixties, apron-creased, unflappable register. Wipes her hands on her apron in the small cabin where John Henry is born.\n\nACTION: Her knuckles whiten on the bedpost; she throws her head back, breath ragged. A newborn cry tears the silence.\nCOMPOSITION: Hard rim light along brow and jaw, eyes lost in shadow. Sweat catches the lantern.\nMOOD: Mythic, hushed, ominous\n\nNEGATIVE: no text, no logos, no UI, no watermarks, no illustration.",
+    "meta": {
+      "stage": "first_frame_composition",
+      "scene": "s01_birth",
+      "shot": "s01_sh03"
+    }
+  },
+  "frames/s01_birth/s01_sh03.png": {
+    "model": "gen4_image",
+    "prompt": "Photorealistic cinematic film still. anamorphic, practical light, teal-and-orange grade, 35mm grain, shallow depth of. Anamorphic 16:9.\nSHOT: CU side profile angle, 50mm.\nLOCATION: Small slave cabin, Virginia, Black night.\nCHARACTERS: John Henry; John Henry's mother; The midwife\nACTION: Her knuckles whiten on the bedpost; she throws her head back, breath ragged. A newborn cry tears the silence.\nMOOD: Mythic, hushed, ominous\nNEGATIVE: no text, no logos, no watermarks.",
+    "meta": {
+      "stage": "first_frame",
+      "scene": "s01_birth",
+      "shot": "s01_sh03"
+    }
+  },
+  "frames/s01_birth/s01_sh04.composition.png": {
+    "model": "gpt_image",
+    "prompt": "VISUAL STYLE: anamorphic, practical light, teal-and-orange grade, 35mm grain, shallow depth of field.\nLENS: Spherical primes on large-format digital (ARRI Alexa 65 or LF) to mimic the grain-and-grandeur of 65mm stock: Panavision Sphero 65 / DNA LF set — 24mm, 29mm, 35mm, 50mm, 75mm, 100mm. Lean heavily on the 35mm and 50mm for waist-up portraiture; reserve the 24mm for landscape vistas and the 100mm for compressed heat-haze montages. Minimal zooms. Glass chosen for gentle field curvature and warm uncoated flares from oil-lamp and lantern practicals..\nGRADE: A warm, earth-pigment palette — oxblood reds, tobacco browns, longleaf-pine greens, and bone-white skies — printed with crushed shadows, creamy highlight rolloff, and a subtle silver-retention bite in the midtones so skin reads like worked leather and iron..\n\nPHOTOREALISTIC CINEMATIC FILM STILL.\n\nSHOT: MCU (low, looking up angle), ~35mm lens.\nCAMERA: starts slow tilt up as midwife lifts the child.\n\nLOCATION: Small slave cabin, Virginia. Inspired by surviving antebellum slave quarters in Tidewater Virginia — a single-room dwelling of hand-hewn pine logs chinked with red clay, a packed dirt floor, and a tin roof patched with flattened cans. A lone kerosene lantern is the only light source, throwing a tight amber pool over a straw-tic\nTIME: Black night\n\nCHARACTERS:\n  - John Henry — monumental Black laborer in his early thirties, granite-jawed, quietly thunderous. Towering, broad-chested Black steel driver born on a Virginia plantation in the 1840s; calm-eyed, quiet, with skillet-sized hands. After Emancipation he follows the railroad camps, becomes the legendary hammer-swinger at Big Bend Tunnel.\n  - John Henry's mother — slender Black woman in her early twenties, firelit, tender but iron-spined. An enslaved woman who has known the long road between Virginia plantations; holds the newborn legend in her arms by firelight.\n  - The midwife — stout Black elder woman in her sixties, apron-creased, unflappable register. Wipes her hands on her apron in the small cabin where John Henry is born.\n\nACTION: The midwife lifts the impossibly large, broad-chested infant. Her face goes slack with awe.\nSPEAKER FOCUS: The midwife is the one delivering the line in this shot — frame and light them as the dialogue subject; other characters react or listen.\nCOMPOSITION: Infant silhouetted against lantern halo — biblical framing. Midwife's lips clearly visible for lip-sync.\nMOOD: Mythic, hushed, ominous\n\nNEGATIVE: no text, no logos, no UI, no watermarks, no illustration.",
+    "meta": {
+      "stage": "first_frame_composition",
+      "scene": "s01_birth",
+      "shot": "s01_sh04"
+    }
+  },
+  "frames/s01_birth/s01_sh04.png": {
+    "model": "gen4_image",
+    "prompt": "Photorealistic cinematic film still. anamorphic, practical light, teal-and-orange grade, 35mm grain, shallow depth of. Anamorphic 16:9.\nSHOT: MCU low, looking up angle, 35mm.\nLOCATION: Small slave cabin, Virginia, Black night.\nCHARACTERS: John Henry; John Henry's mother; The midwife\nACTION: The midwife lifts the impossibly large, broad-chested infant. Her face goes slack with awe.\nMOOD: Mythic, hushed, ominous\nNEGATIVE: no text, no logos, no watermarks.",
+    "meta": {
+      "stage": "first_frame",
+      "scene": "s01_birth",
+      "shot": "s01_sh04"
+    }
+  },
+  "frames/s01_birth/s01_sh05.composition.png": {
+    "model": "gpt_image",
+    "prompt": "VISUAL STYLE: anamorphic, practical light, teal-and-orange grade, 35mm grain, shallow depth of field.\nLENS: Spherical primes on large-format digital (ARRI Alexa 65 or LF) to mimic the grain-and-grandeur of 65mm stock: Panavision Sphero 65 / DNA LF set — 24mm, 29mm, 35mm, 50mm, 75mm, 100mm. Lean heavily on the 35mm and 50mm for waist-up portraiture; reserve the 24mm for landscape vistas and the 100mm for compressed heat-haze montages. Minimal zooms. Glass chosen for gentle field curvature and warm uncoated flares from oil-lamp and lantern practicals..\nGRADE: A warm, earth-pigment palette — oxblood reds, tobacco browns, longleaf-pine greens, and bone-white skies — printed with crushed shadows, creamy highlight rolloff, and a subtle silver-retention bite in the midtones so skin reads like worked leather and iron..\n\nPHOTOREALISTIC CINEMATIC FILM STILL.\n\nSHOT: ECU (straight on angle), ~85mm lens.\nCAMERA: starts static.\n\nLOCATION: Small slave cabin, Virginia. Inspired by surviving antebellum slave quarters in Tidewater Virginia — a single-room dwelling of hand-hewn pine logs chinked with red clay, a packed dirt floor, and a tin roof patched with flattened cans. A lone kerosene lantern is the only light source, throwing a tight amber pool over a straw-tic\nTIME: Black night\n\nCHARACTERS:\n  - John Henry — monumental Black laborer in his early thirties, granite-jawed, quietly thunderous. Towering, broad-chested Black steel driver born on a Virginia plantation in the 1840s; calm-eyed, quiet, with skillet-sized hands. After Emancipation he follows the railroad camps, becomes the legendary hammer-swinger at Big Bend Tunnel.\n  - John Henry's mother — slender Black woman in her early twenties, firelit, tender but iron-spined. An enslaved woman who has known the long road between Virginia plantations; holds the newborn legend in her arms by firelight.\n  - The midwife — stout Black elder woman in her sixties, apron-creased, unflappable register. Wipes her hands on her apron in the small cabin where John Henry is born.\n\nACTION: The baby's eyes are open — dark, ancient, knowing. They do not blink.\nCOMPOSITION: Razor-thin focus on the irises. Lantern reflected as twin pinpricks. Mythic stillness.\nMOOD: Mythic, hushed, ominous\n\nNEGATIVE: no text, no logos, no UI, no watermarks, no illustration.",
+    "meta": {
+      "stage": "first_frame_composition",
+      "scene": "s01_birth",
+      "shot": "s01_sh05"
+    }
+  },
+  "frames/s01_birth/s01_sh06.composition.png": {
+    "model": "gpt_image",
+    "prompt": "VISUAL STYLE: anamorphic, practical light, teal-and-orange grade, 35mm grain, shallow depth of field.\nLENS: Spherical primes on large-format digital (ARRI Alexa 65 or LF) to mimic the grain-and-grandeur of 65mm stock: Panavision Sphero 65 / DNA LF set — 24mm, 29mm, 35mm, 50mm, 75mm, 100mm. Lean heavily on the 35mm and 50mm for waist-up portraiture; reserve the 24mm for landscape vistas and the 100mm for compressed heat-haze montages. Minimal zooms. Glass chosen for gentle field curvature and warm uncoated flares from oil-lamp and lantern practicals..\nGRADE: A warm, earth-pigment palette — oxblood reds, tobacco browns, longleaf-pine greens, and bone-white skies — printed with crushed shadows, creamy highlight rolloff, and a subtle silver-retention bite in the midtones so skin reads like worked leather and iron..\n\nPHOTOREALISTIC CINEMATIC FILM STILL.\n\nSHOT: CU (low, looking up past the fist toward the rafters angle), ~50mm lens.\nCAMERA: starts slow push-in on the tiny hand.\n\nLOCATION: Small slave cabin, Virginia. Inspired by surviving antebellum slave quarters in Tidewater Virginia — a single-room dwelling of hand-hewn pine logs chinked with red clay, a packed dirt floor, and a tin roof patched with flattened cans. A lone kerosene lantern is the only light source, throwing a tight amber pool over a straw-tic\nTIME: Black night\n\nCHARACTERS:\n  - John Henry — monumental Black laborer in his early thirties, granite-jawed, quietly thunderous. Towering, broad-chested Black steel driver born on a Virginia plantation in the 1840s; calm-eyed, quiet, with skillet-sized hands. After Emancipation he follows the railroad camps, becomes the legendary hammer-swinger at Big Bend Tunnel.\n  - John Henry's mother — slender Black woman in her early twenties, firelit, tender but iron-spined. An enslaved woman who has known the long road between Virginia plantations; holds the newborn legend in her arms by firelight.\n  - The midwife — stout Black elder woman in her sixties, apron-creased, unflappable register. Wipes her hands on her apron in the small cabin where John Henry is born.\n\nACTION: The infant's tiny fist lifts toward the dark rafters, fingers closing on empty air as if gripping an unseen hammer handle.\nSPEAKER FOCUS: John Henry is the one delivering the line in this shot — frame and light them as the dialogue subject; other characters react or listen.\nCOMPOSITION: Fist centered against black rafters. Voice is a low, impossible whisper — infant on screen, but mouth not emphasized; line reads as prophecy over the gesture. Thunder rolls beneath.\nMOOD: Mythic, hushed, ominous\n\nNEGATIVE: no text, no logos, no UI, no watermarks, no illustration.",
+    "meta": {
+      "stage": "first_frame_composition",
+      "scene": "s01_birth",
+      "shot": "s01_sh06"
+    }
+  },
+  "frames/s01_birth/s01_sh06.png": {
+    "model": "gen4_image",
+    "prompt": "Photorealistic cinematic film still. anamorphic, practical light, teal-and-orange grade, 35mm grain, shallow depth of. Anamorphic 16:9.\nSHOT: CU low, looking up past the fist toward the rafters angle, 50mm.\nLOCATION: Small slave cabin, Virginia, Black night.\nCHARACTERS: John Henry; John Henry's mother; The midwife\nACTION: The infant's tiny fist lifts toward the dark rafters, fingers closing on empty air as if gripping an unseen hammer handle.\nMOOD: Mythic, hushed, ominous\nNEGATIVE: no text, no logos, no watermarks.",
+    "meta": {
+      "stage": "first_frame",
+      "scene": "s01_birth",
+      "shot": "s01_sh06"
+    }
+  },
+  "frames/s01_birth/s01_sh05.png": {
+    "model": "gen4_image",
+    "prompt": "Photorealistic cinematic film still. anamorphic, practical light, teal-and-orange grade, 35mm grain, shallow depth of. Anamorphic 16:9.\nSHOT: ECU straight on angle, 85mm.\nLOCATION: Small slave cabin, Virginia, Black night.\nCHARACTERS: John Henry; John Henry's mother; The midwife\nACTION: The baby's eyes are open — dark, ancient, knowing. They do not blink.\nMOOD: Mythic, hushed, ominous\nNEGATIVE: no text, no logos, no watermarks.",
+    "meta": {
+      "stage": "first_frame",
+      "scene": "s01_birth",
+      "shot": "s01_sh05"
+    }
+  },
+  "frames/s02_growing_up/s02_sh01.composition.png": {
+    "model": "gpt_image",
+    "prompt": "VISUAL STYLE: anamorphic, practical light, teal-and-orange grade, 35mm grain, shallow depth of field.\nLENS: Spherical primes on large-format digital (ARRI Alexa 65 or LF) to mimic the grain-and-grandeur of 65mm stock: Panavision Sphero 65 / DNA LF set — 24mm, 29mm, 35mm, 50mm, 75mm, 100mm. Lean heavily on the 35mm and 50mm for waist-up portraiture; reserve the 24mm for landscape vistas and the 100mm for compressed heat-haze montages. Minimal zooms. Glass chosen for gentle field curvature and warm uncoated flares from oil-lamp and lantern practicals..\nGRADE: A warm, earth-pigment palette — oxblood reds, tobacco browns, longleaf-pine greens, and bone-white skies — printed with crushed shadows, creamy highlight rolloff, and a subtle silver-retention bite in the midtones so skin reads like worked leather and iron..\n\nPHOTOREALISTIC CINEMATIC FILM STILL.\n\nSHOT: MLS (low angle angle), ~35mm lens.\nCAMERA: starts slow push-in.\n\nLOCATION: Cotton fields, sawmills, and the road to the railroad camps. A composite Reconstruction-era Southern landscape drawn from Piedmont cotton country, Carolina pine sawmills, and the rutted clay roads that fed the C&O rail expansion. Light is wide and unforgiving: a high, bleaching noon sun over the cotton rows, then dust-filtered God-rays slanting through a sawm\nTIME: Years passing\n\nCHARACTERS:\n  - John Henry — monumental Black laborer in his early thirties, granite-jawed, quietly thunderous. Towering, broad-chested Black steel driver born on a Virginia plantation in the 1840s; calm-eyed, quiet, with skillet-sized hands. After Emancipation he follows the railroad camps, becomes the legendary hammer-swinger at Big Bend Tunnel.\n\nACTION: Boy hoists a heavy oak cider barrel onto one shoulder, grinning wide at off-screen field hands; cotton bolls glow white around him.\nVOICE-OVER SCENE: the line in dialogue_excerpt is voice-over by an unseen narrator — compose this as a clean action / establishing image; no character should be framed as if mid-speech.\nCOMPOSITION: Boy framed against blazing sky, barrel silhouetted high; heat haze ripples the horizon. Golden-hour key, dust motes in the air.\nMOOD: Rising, determined, foreshadowing\n\nNEGATIVE: no text, no logos, no UI, no watermarks, no illustration.",
+    "meta": {
+      "stage": "first_frame_composition",
+      "scene": "s02_growing_up",
+      "shot": "s02_sh01"
+    }
+  },
+  "frames/s02_growing_up/s02_sh01.png": {
+    "model": "gen4_image",
+    "prompt": "Photorealistic cinematic film still. anamorphic, practical light, teal-and-orange grade, 35mm grain, shallow depth of. Anamorphic 16:9.\nSHOT: MLS low angle angle, 35mm.\nLOCATION: Cotton fields, sawmills, and the road to the railroad camps, Years passing.\nCHARACTERS: John Henry\nACTION: Boy hoists a heavy oak cider barrel onto one shoulder, grinning wide at off-screen field hands; cotton bolls glow white around him.\nMOOD: Rising, determined, foreshadowing\nNEGATIVE: no text, no logos, no watermarks.",
+    "meta": {
+      "stage": "first_frame",
+      "scene": "s02_growing_up",
+      "shot": "s02_sh01"
+    }
+  },
+  "frames/s02_growing_up/s02_sh02.composition.png": {
+    "model": "gpt_image",
+    "prompt": "VISUAL STYLE: anamorphic, practical light, teal-and-orange grade, 35mm grain, shallow depth of field.\nLENS: Spherical primes on large-format digital (ARRI Alexa 65 or LF) to mimic the grain-and-grandeur of 65mm stock: Panavision Sphero 65 / DNA LF set — 24mm, 29mm, 35mm, 50mm, 75mm, 100mm. Lean heavily on the 35mm and 50mm for waist-up portraiture; reserve the 24mm for landscape vistas and the 100mm for compressed heat-haze montages. Minimal zooms. Glass chosen for gentle field curvature and warm uncoated flares from oil-lamp and lantern practicals..\nGRADE: A warm, earth-pigment palette — oxblood reds, tobacco browns, longleaf-pine greens, and bone-white skies — printed with crushed shadows, creamy highlight rolloff, and a subtle silver-retention bite in the midtones so skin reads like worked leather and iron..\n\nPHOTOREALISTIC CINEMATIC FILM STILL.\n\nSHOT: CU (low angle angle), ~50mm lens.\nCAMERA: starts static.\n\nLOCATION: Cotton fields, sawmills, and the road to the railroad camps. A composite Reconstruction-era Southern landscape drawn from Piedmont cotton country, Carolina pine sawmills, and the rutted clay roads that fed the C&O rail expansion. Light is wide and unforgiving: a high, bleaching noon sun over the cotton rows, then dust-filtered God-rays slanting through a sawm\nTIME: Years passing\n\nCHARACTERS:\n  - John Henry — monumental Black laborer in his early thirties, granite-jawed, quietly thunderous. Towering, broad-chested Black steel driver born on a Virginia plantation in the 1840s; calm-eyed, quiet, with skillet-sized hands. After Emancipation he follows the railroad camps, becomes the legendary hammer-swinger at Big Bend Tunnel.\n\nACTION: Two weathered men in straw hats stare up, mouths slightly open, sweat on their brows; one shakes his head in disbelief.\nCOMPOSITION: Tight two-shot reaction. Shallow focus, cotton field bokeh behind. Beat of awe.\nMOOD: Rising, determined, foreshadowing\n\nNEGATIVE: no text, no logos, no UI, no watermarks, no illustration.",
+    "meta": {
+      "stage": "first_frame_composition",
+      "scene": "s02_growing_up",
+      "shot": "s02_sh02"
+    }
+  },
+  "frames/s02_growing_up/s02_sh02.png": {
+    "model": "gen4_image",
+    "prompt": "Photorealistic cinematic film still. anamorphic, practical light, teal-and-orange grade, 35mm grain, shallow depth of. Anamorphic 16:9.\nSHOT: CU low angle angle, 50mm.\nLOCATION: Cotton fields, sawmills, and the road to the railroad camps, Years passing.\nCHARACTERS: John Henry\nACTION: Two weathered men in straw hats stare up, mouths slightly open, sweat on their brows; one shakes his head in disbelief.\nMOOD: Rising, determined, foreshadowing\nNEGATIVE: no text, no logos, no watermarks.",
+    "meta": {
+      "stage": "first_frame",
+      "scene": "s02_growing_up",
+      "shot": "s02_sh02"
+    }
+  },
+  "frames/s02_growing_up/s02_sh03.composition.png": {
+    "model": "gpt_image",
+    "prompt": "VISUAL STYLE: anamorphic, practical light, teal-and-orange grade, 35mm grain, shallow depth of field.\nLENS: Spherical primes on large-format digital (ARRI Alexa 65 or LF) to mimic the grain-and-grandeur of 65mm stock: Panavision Sphero 65 / DNA LF set — 24mm, 29mm, 35mm, 50mm, 75mm, 100mm. Lean heavily on the 35mm and 50mm for waist-up portraiture; reserve the 24mm for landscape vistas and the 100mm for compressed heat-haze montages. Minimal zooms. Glass chosen for gentle field curvature and warm uncoated flares from oil-lamp and lantern practicals..\nGRADE: A warm, earth-pigment palette — oxblood reds, tobacco browns, longleaf-pine greens, and bone-white skies — printed with crushed shadows, creamy highlight rolloff, and a subtle silver-retention bite in the midtones so skin reads like worked leather and iron..\n\nPHOTOREALISTIC CINEMATIC FILM STILL.\n\nSHOT: MS (side profile angle), ~40mm lens.\nCAMERA: starts tracking with the swing.\n\nLOCATION: Cotton fields, sawmills, and the road to the railroad camps. A composite Reconstruction-era Southern landscape drawn from Piedmont cotton country, Carolina pine sawmills, and the rutted clay roads that fed the C&O rail expansion. Light is wide and unforgiving: a high, bleaching noon sun over the cotton rows, then dust-filtered God-rays slanting through a sawm\nTIME: Years passing\n\nCHARACTERS:\n  - John Henry — monumental Black laborer in his early thirties, granite-jawed, quietly thunderous. Towering, broad-chested Black steel driver born on a Virginia plantation in the 1840s; calm-eyed, quiet, with skillet-sized hands. After Emancipation he follows the railroad camps, becomes the legendary hammer-swinger at Big Bend Tunnel.\n\nACTION: Taller now, shirt clinging with sweat, he hauls an axe up over his head and brings it down — a thick timber splits clean in a burst of pale chips.\nCOMPOSITION: Sawmill interior, shafts of dusty light through plank walls. Stacks of cut lumber frame him. Strong rim light from a high window.\nMOOD: Rising, determined, foreshadowing\n\nNEGATIVE: no text, no logos, no UI, no watermarks, no illustration.",
+    "meta": {
+      "stage": "first_frame_composition",
+      "scene": "s02_growing_up",
+      "shot": "s02_sh03"
+    }
+  },
+  "frames/s02_growing_up/s02_sh03.png": {
+    "model": "gen4_image",
+    "prompt": "Photorealistic cinematic film still. anamorphic, practical light, teal-and-orange grade, 35mm grain, shallow depth of. Anamorphic 16:9.\nSHOT: MS side profile angle, 40mm.\nLOCATION: Cotton fields, sawmills, and the road to the railroad camps, Years passing.\nCHARACTERS: John Henry\nACTION: Taller now, shirt clinging with sweat, he hauls an axe up over his head and brings it down — a thick timber splits clean in a burst of pale chips.\nMOOD: Rising, determined, foreshadowing\nNEGATIVE: no text, no logos, no watermarks.",
+    "meta": {
+      "stage": "first_frame",
+      "scene": "s02_growing_up",
+      "shot": "s02_sh03"
+    }
+  },
+  "frames/s02_growing_up/s02_sh04.composition.png": {
+    "model": "gpt_image",
+    "prompt": "VISUAL STYLE: anamorphic, practical light, teal-and-orange grade, 35mm grain, shallow depth of field.\nLENS: Spherical primes on large-format digital (ARRI Alexa 65 or LF) to mimic the grain-and-grandeur of 65mm stock: Panavision Sphero 65 / DNA LF set — 24mm, 29mm, 35mm, 50mm, 75mm, 100mm. Lean heavily on the 35mm and 50mm for waist-up portraiture; reserve the 24mm for landscape vistas and the 100mm for compressed heat-haze montages. Minimal zooms. Glass chosen for gentle field curvature and warm uncoated flares from oil-lamp and lantern practicals..\nGRADE: A warm, earth-pigment palette — oxblood reds, tobacco browns, longleaf-pine greens, and bone-white skies — printed with crushed shadows, creamy highlight rolloff, and a subtle silver-retention bite in the midtones so skin reads like worked leather and iron..\n\nPHOTOREALISTIC CINEMATIC FILM STILL.\n\nSHOT: MCU (eye-level, slight low angle), ~50mm lens.\nCAMERA: starts static.\n\nLOCATION: Cotton fields, sawmills, and the road to the railroad camps. A composite Reconstruction-era Southern landscape drawn from Piedmont cotton country, Carolina pine sawmills, and the rutted clay roads that fed the C&O rail expansion. Light is wide and unforgiving: a high, bleaching noon sun over the cotton rows, then dust-filtered God-rays slanting through a sawm\nTIME: Years passing\n\nCHARACTERS:\n  - John Henry — monumental Black laborer in his early thirties, granite-jawed, quietly thunderous. Towering, broad-chested Black steel driver born on a Virginia plantation in the 1840s; calm-eyed, quiet, with skillet-sized hands. After Emancipation he follows the railroad camps, becomes the legendary hammer-swinger at Big Bend Tunnel.\n\nACTION: He glances aside with an easy half-smile, wipes his brow with the back of a forearm, speaks without strain.\nSPEAKER FOCUS: John Henry is the one delivering the line in this shot — frame and light them as the dialogue subject; other characters react or listen.\nCOMPOSITION: Sawdust drifts past lens. Warm tungsten-like daylight on his face; background falls into shadow. Confidence, not arrogance.\nMOOD: Rising, determined, foreshadowing\n\nNEGATIVE: no text, no logos, no UI, no watermarks, no illustration.",
+    "meta": {
+      "stage": "first_frame_composition",
+      "scene": "s02_growing_up",
+      "shot": "s02_sh04"
+    }
+  },
+  "frames/s02_growing_up/s02_sh04.png": {
+    "model": "gen4_image",
+    "prompt": "Photorealistic cinematic film still. anamorphic, practical light, teal-and-orange grade, 35mm grain, shallow depth of. Anamorphic 16:9.\nSHOT: MCU eye-level, slight low angle, 50mm.\nLOCATION: Cotton fields, sawmills, and the road to the railroad camps, Years passing.\nCHARACTERS: John Henry\nACTION: He glances aside with an easy half-smile, wipes his brow with the back of a forearm, speaks without strain.\nMOOD: Rising, determined, foreshadowing\nNEGATIVE: no text, no logos, no watermarks.",
+    "meta": {
+      "stage": "first_frame",
+      "scene": "s02_growing_up",
+      "shot": "s02_sh04"
+    }
+  },
+  "frames/s02_growing_up/s02_sh05.composition.png": {
+    "model": "gpt_image",
+    "prompt": "VISUAL STYLE: anamorphic, practical light, teal-and-orange grade, 35mm grain, shallow depth of field.\nLENS: Spherical primes on large-format digital (ARRI Alexa 65 or LF) to mimic the grain-and-grandeur of 65mm stock: Panavision Sphero 65 / DNA LF set — 24mm, 29mm, 35mm, 50mm, 75mm, 100mm. Lean heavily on the 35mm and 50mm for waist-up portraiture; reserve the 24mm for landscape vistas and the 100mm for compressed heat-haze montages. Minimal zooms. Glass chosen for gentle field curvature and warm uncoated flares from oil-lamp and lantern practicals..\nGRADE: A warm, earth-pigment palette — oxblood reds, tobacco browns, longleaf-pine greens, and bone-white skies — printed with crushed shadows, creamy highlight rolloff, and a subtle silver-retention bite in the midtones so skin reads like worked leather and iron..\n\nPHOTOREALISTIC CINEMATIC FILM STILL.\n\nSHOT: LS (high wide angle), ~28mm lens.\nCAMERA: starts slow crane down.\n\nLOCATION: Cotton fields, sawmills, and the road to the railroad camps. A composite Reconstruction-era Southern landscape drawn from Piedmont cotton country, Carolina pine sawmills, and the rutted clay roads that fed the C&O rail expansion. Light is wide and unforgiving: a high, bleaching noon sun over the cotton rows, then dust-filtered God-rays slanting through a sawm\nTIME: Years passing\n\nCHARACTERS:\n  - John Henry — monumental Black laborer in his early thirties, granite-jawed, quietly thunderous. Towering, broad-chested Black steel driver born on a Virginia plantation in the 1840s; calm-eyed, quiet, with skillet-sized hands. After Emancipation he follows the railroad camps, becomes the legendary hammer-swinger at Big Bend Tunnel.\n\nACTION: Freedmen with bundles and children scatter down the road in every direction; John Henry stands still at the fork, satchel at his feet, head tilted as if listening.\nVOICE-OVER SCENE: the line in dialogue_excerpt is voice-over by an unseen narrator — compose this as a clean action / establishing image; no character should be framed as if mid-speech.\nCOMPOSITION: Wide vista — dust kicked up by departing crowd, distant pines. John Henry centered, the still point. Late-afternoon light, long shadows pointing toward the smoke on the horizon.\nMOOD: Rising, determined, foreshadowing\n\nNEGATIVE: no text, no logos, no UI, no watermarks, no illustration.",
+    "meta": {
+      "stage": "first_frame_composition",
+      "scene": "s02_growing_up",
+      "shot": "s02_sh05"
+    }
+  },
+  "frames/s02_growing_up/s02_sh05.png": {
+    "model": "gen4_image",
+    "prompt": "Photorealistic cinematic film still. anamorphic, practical light, teal-and-orange grade, 35mm grain, shallow depth of. Anamorphic 16:9.\nSHOT: LS high wide angle, 28mm.\nLOCATION: Cotton fields, sawmills, and the road to the railroad camps, Years passing.\nCHARACTERS: John Henry\nACTION: Freedmen with bundles and children scatter down the road in every direction; John Henry stands still at the fork, satchel at his feet, head tilted as \nMOOD: Rising, determined, foreshadowing\nNEGATIVE: no text, no logos, no watermarks.",
+    "meta": {
+      "stage": "first_frame",
+      "scene": "s02_growing_up",
+      "shot": "s02_sh05"
+    }
+  },
+  "frames/s02_growing_up/s02_sh06.composition.png": {
+    "model": "gpt_image",
+    "prompt": "VISUAL STYLE: anamorphic, practical light, teal-and-orange grade, 35mm grain, shallow depth of field.\nLENS: Spherical primes on large-format digital (ARRI Alexa 65 or LF) to mimic the grain-and-grandeur of 65mm stock: Panavision Sphero 65 / DNA LF set — 24mm, 29mm, 35mm, 50mm, 75mm, 100mm. Lean heavily on the 35mm and 50mm for waist-up portraiture; reserve the 24mm for landscape vistas and the 100mm for compressed heat-haze montages. Minimal zooms. Glass chosen for gentle field curvature and warm uncoated flares from oil-lamp and lantern practicals..\nGRADE: A warm, earth-pigment palette — oxblood reds, tobacco browns, longleaf-pine greens, and bone-white skies — printed with crushed shadows, creamy highlight rolloff, and a subtle silver-retention bite in the midtones so skin reads like worked leather and iron..\n\nPHOTOREALISTIC CINEMATIC FILM STILL.\n\nSHOT: MS (low angle from behind angle), ~35mm lens.\nCAMERA: starts slow push toward horizon.\n\nLOCATION: Cotton fields, sawmills, and the road to the railroad camps. A composite Reconstruction-era Southern landscape drawn from Piedmont cotton country, Carolina pine sawmills, and the rutted clay roads that fed the C&O rail expansion. Light is wide and unforgiving: a high, bleaching noon sun over the cotton rows, then dust-filtered God-rays slanting through a sawm\nTIME: Years passing\n\nCHARACTERS:\n  - John Henry — monumental Black laborer in his early thirties, granite-jawed, quietly thunderous. Towering, broad-chested Black steel driver born on a Virginia plantation in the 1840s; calm-eyed, quiet, with skillet-sized hands. After Emancipation he follows the railroad camps, becomes the legendary hammer-swinger at Big Bend Tunnel.\n\nACTION: He bends, shoulders the battered satchel, and starts walking toward black smoke columns rising on the horizon — railroad camp scaffolding faint in the haze.\nSPEAKER FOCUS: John Henry is the one delivering the line in this shot — frame and light them as the dialogue subject; other characters react or listen.\nCOMPOSITION: Backlit silhouette against amber sky and smoke. We hear his quiet line as he moves — face turned in three-quarter so lips are visible at the start. Foreshadowing weight in his stride.\nMOOD: Rising, determined, foreshadowing\n\nNEGATIVE: no text, no logos, no UI, no watermarks, no illustration.",
+    "meta": {
+      "stage": "first_frame_composition",
+      "scene": "s02_growing_up",
+      "shot": "s02_sh06"
+    }
+  },
+  "frames/s02_growing_up/s02_sh06.png": {
+    "model": "gen4_image",
+    "prompt": "Photorealistic cinematic film still. anamorphic, practical light, teal-and-orange grade, 35mm grain, shallow depth of. Anamorphic 16:9.\nSHOT: MS low angle from behind angle, 35mm.\nLOCATION: Cotton fields, sawmills, and the road to the railroad camps, Years passing.\nCHARACTERS: John Henry\nACTION: He bends, shoulders the battered satchel, and starts walking toward black smoke columns rising on the horizon — railroad camp scaffolding faint in the\nMOOD: Rising, determined, foreshadowing\nNEGATIVE: no text, no logos, no watermarks.",
+    "meta": {
+      "stage": "first_frame",
+      "scene": "s02_growing_up",
+      "shot": "s02_sh06"
+    }
+  },
+  "frames/s03_brush_arbor/s03_01.composition.png": {
+    "model": "gpt_image",
+    "prompt": "VISUAL STYLE: anamorphic, practical light, teal-and-orange grade, 35mm grain, shallow depth of field.\nLENS: Spherical primes on large-format digital (ARRI Alexa 65 or LF) to mimic the grain-and-grandeur of 65mm stock: Panavision Sphero 65 / DNA LF set — 24mm, 29mm, 35mm, 50mm, 75mm, 100mm. Lean heavily on the 35mm and 50mm for waist-up portraiture; reserve the 24mm for landscape vistas and the 100mm for compressed heat-haze montages. Minimal zooms. Glass chosen for gentle field curvature and warm uncoated flares from oil-lamp and lantern practicals..\nGRADE: A warm, earth-pigment palette — oxblood reds, tobacco browns, longleaf-pine greens, and bone-white skies — printed with crushed shadows, creamy highlight rolloff, and a subtle silver-retention bite in the midtones so skin reads like worked leather and iron..\n\nPHOTOREALISTIC CINEMATIC FILM STILL.\n\nSHOT: MLS (low, looking up toward rafters angle), ~32mm lens.\nCAMERA: starts slow push-in.\n\nLOCATION: Brush-arbor church and red dirt road, the Carolinas. Modeled on the brush-arbor and pine-board praise houses of the post-Emancipation Carolinas — an open-sided shelter of rough pine slats and a roof of fresh-cut pine boughs, set in a longleaf clearing off a clay road the color of dried blood. Light is the hero: hard Sunday-noon sun slices between boar\nTIME: Hot Sunday\n\nCHARACTERS:\n  - John Henry — monumental Black laborer in his early thirties, granite-jawed, quietly thunderous. Towering, broad-chested Black steel driver born on a Virginia plantation in the 1840s; calm-eyed, quiet, with skillet-sized hands. After Emancipation he follows the railroad camps, becomes the legendary hammer-swinger at Big Bend Tunnel.\n  - Polly Ann — petite, fiery Black woman in her late twenties with a singer's open chest and flashing eyes. John Henry's small, fierce wife with a yellow kerchief, a laugh that fills clearings and a temper that empties them. Mother, singer, and steel driver in her own right.\n\nACTION: Sunlight knifes through pine-board slats. Dust motes drift. Congregation sways in pews, hands lifted.\nCOMPOSITION: God-rays cutting diagonal across frame. Silhouetted heads in foreground, lit slats above. Establishes heat and reverence.\nMOOD: Warm, tender, fated\n\nNEGATIVE: no text, no logos, no UI, no watermarks, no illustration.",
+    "meta": {
+      "stage": "first_frame_composition",
+      "scene": "s03_brush_arbor",
+      "shot": "s03_01"
+    }
+  },
+  "frames/s03_brush_arbor/s03_02.composition.png": {
+    "model": "gpt_image",
+    "prompt": "VISUAL STYLE: anamorphic, practical light, teal-and-orange grade, 35mm grain, shallow depth of field.\nLENS: Spherical primes on large-format digital (ARRI Alexa 65 or LF) to mimic the grain-and-grandeur of 65mm stock: Panavision Sphero 65 / DNA LF set — 24mm, 29mm, 35mm, 50mm, 75mm, 100mm. Lean heavily on the 35mm and 50mm for waist-up portraiture; reserve the 24mm for landscape vistas and the 100mm for compressed heat-haze montages. Minimal zooms. Glass chosen for gentle field curvature and warm uncoated flares from oil-lamp and lantern practicals..\nGRADE: A warm, earth-pigment palette — oxblood reds, tobacco browns, longleaf-pine greens, and bone-white skies — printed with crushed shadows, creamy highlight rolloff, and a subtle silver-retention bite in the midtones so skin reads like worked leather and iron..\n\nPHOTOREALISTIC CINEMATIC FILM STILL.\n\nSHOT: MCU (slight low angle), ~50mm lens.\nCAMERA: starts static, almost imperceptible drift up.\n\nLOCATION: Brush-arbor church and red dirt road, the Carolinas. Modeled on the brush-arbor and pine-board praise houses of the post-Emancipation Carolinas — an open-sided shelter of rough pine slats and a roof of fresh-cut pine boughs, set in a longleaf clearing off a clay road the color of dried blood. Light is the hero: hard Sunday-noon sun slices between boar\nTIME: Hot Sunday\n\nCHARACTERS:\n  - John Henry — monumental Black laborer in his early thirties, granite-jawed, quietly thunderous. Towering, broad-chested Black steel driver born on a Virginia plantation in the 1840s; calm-eyed, quiet, with skillet-sized hands. After Emancipation he follows the railroad camps, becomes the legendary hammer-swinger at Big Bend Tunnel.\n  - Polly Ann — petite, fiery Black woman in her late twenties with a singer's open chest and flashing eyes. John Henry's small, fierce wife with a yellow kerchief, a laugh that fills clearings and a temper that empties them. Mother, singer, and steel driver in her own right.\n\nACTION: Polly Ann in a yellow kerchief, small and straight-backed, lifts a hymn line. Her throat works; her eyes are closed.\nSPEAKER FOCUS: Polly Ann is the one delivering the line in this shot — frame and light them as the dialogue subject; other characters react or listen.\nCOMPOSITION: Backlight halos the yellow kerchief. Shallow focus; pews soft behind. Warm key from a slat of sun across her cheek.\nMOOD: Warm, tender, fated\n\nNEGATIVE: no text, no logos, no UI, no watermarks, no illustration.",
+    "meta": {
+      "stage": "first_frame_composition",
+      "scene": "s03_brush_arbor",
+      "shot": "s03_02"
+    }
+  },
+  "frames/s03_brush_arbor/s03_01.png": {
+    "model": "gen4_image",
+    "prompt": "Photorealistic cinematic film still. anamorphic, practical light, teal-and-orange grade, 35mm grain, shallow depth of. Anamorphic 16:9.\nSHOT: MLS low, looking up toward rafters angle, 32mm.\nLOCATION: Brush-arbor church and red dirt road, the Carolinas, Hot Sunday.\nCHARACTERS: John Henry; Polly Ann\nACTION: Sunlight knifes through pine-board slats. Dust motes drift. Congregation sways in pews, hands lifted.\nMOOD: Warm, tender, fated\nNEGATIVE: no text, no logos, no watermarks.",
+    "meta": {
+      "stage": "first_frame",
+      "scene": "s03_brush_arbor",
+      "shot": "s03_01"
+    }
+  },
+  "frames/s03_brush_arbor/s03_02.png": {
+    "model": "gen4_image",
+    "prompt": "Photorealistic cinematic film still. anamorphic, practical light, teal-and-orange grade, 35mm grain, shallow depth of. Anamorphic 16:9.\nSHOT: MCU slight low angle, 50mm.\nLOCATION: Brush-arbor church and red dirt road, the Carolinas, Hot Sunday.\nCHARACTERS: John Henry; Polly Ann\nACTION: Polly Ann in a yellow kerchief, small and straight-backed, lifts a hymn line. Her throat works; her eyes are closed.\nMOOD: Warm, tender, fated\nNEGATIVE: no text, no logos, no watermarks.",
+    "meta": {
+      "stage": "first_frame",
+      "scene": "s03_brush_arbor",
+      "shot": "s03_02"
+    }
+  },
+  "frames/s03_brush_arbor/s03_03.composition.png": {
+    "model": "gpt_image",
+    "prompt": "VISUAL STYLE: anamorphic, practical light, teal-and-orange grade, 35mm grain, shallow depth of field.\nLENS: Spherical primes on large-format digital (ARRI Alexa 65 or LF) to mimic the grain-and-grandeur of 65mm stock: Panavision Sphero 65 / DNA LF set — 24mm, 29mm, 35mm, 50mm, 75mm, 100mm. Lean heavily on the 35mm and 50mm for waist-up portraiture; reserve the 24mm for landscape vistas and the 100mm for compressed heat-haze montages. Minimal zooms. Glass chosen for gentle field curvature and warm uncoated flares from oil-lamp and lantern practicals..\nGRADE: A warm, earth-pigment palette — oxblood reds, tobacco browns, longleaf-pine greens, and bone-white skies — printed with crushed shadows, creamy highlight rolloff, and a subtle silver-retention bite in the midtones so skin reads like worked leather and iron..\n\nPHOTOREALISTIC CINEMATIC FILM STILL.\n\nSHOT: MS (low, from the aisle floor angle), ~35mm lens.\nCAMERA: starts tilt up as he rises.\n\nLOCATION: Brush-arbor church and red dirt road, the Carolinas. Modeled on the brush-arbor and pine-board praise houses of the post-Emancipation Carolinas — an open-sided shelter of rough pine slats and a roof of fresh-cut pine boughs, set in a longleaf clearing off a clay road the color of dried blood. Light is the hero: hard Sunday-noon sun slices between boar\nTIME: Hot Sunday\n\nCHARACTERS:\n  - John Henry — monumental Black laborer in his early thirties, granite-jawed, quietly thunderous. Towering, broad-chested Black steel driver born on a Virginia plantation in the 1840s; calm-eyed, quiet, with skillet-sized hands. After Emancipation he follows the railroad camps, becomes the legendary hammer-swinger at Big Bend Tunnel.\n  - Polly Ann — petite, fiery Black woman in her late twenties with a singer's open chest and flashing eyes. John Henry's small, fierce wife with a yellow kerchief, a laugh that fills clearings and a temper that empties them. Mother, singer, and steel driver in her own right.\n\nACTION: From the back row John Henry rises — enormous, broad as a doorframe. His bass answers her line, low as river stone.\nSPEAKER FOCUS: John Henry is the one delivering the line in this shot — frame and light them as the dialogue subject; other characters react or listen.\nCOMPOSITION: He fills the frame top to bottom. Slat-light bars his chest and face. Smaller worshippers in foreground emphasize his scale.\nMOOD: Warm, tender, fated\n\nNEGATIVE: no text, no logos, no UI, no watermarks, no illustration.",
+    "meta": {
+      "stage": "first_frame_composition",
+      "scene": "s03_brush_arbor",
+      "shot": "s03_03"
+    }
+  },
+  "frames/s03_brush_arbor/s03_04.composition.png": {
+    "model": "gpt_image",
+    "prompt": "VISUAL STYLE: anamorphic, practical light, teal-and-orange grade, 35mm grain, shallow depth of field.\nLENS: Spherical primes on large-format digital (ARRI Alexa 65 or LF) to mimic the grain-and-grandeur of 65mm stock: Panavision Sphero 65 / DNA LF set — 24mm, 29mm, 35mm, 50mm, 75mm, 100mm. Lean heavily on the 35mm and 50mm for waist-up portraiture; reserve the 24mm for landscape vistas and the 100mm for compressed heat-haze montages. Minimal zooms. Glass chosen for gentle field curvature and warm uncoated flares from oil-lamp and lantern practicals..\nGRADE: A warm, earth-pigment palette — oxblood reds, tobacco browns, longleaf-pine greens, and bone-white skies — printed with crushed shadows, creamy highlight rolloff, and a subtle silver-retention bite in the midtones so skin reads like worked leather and iron..\n\nPHOTOREALISTIC CINEMATIC FILM STILL.\n\nSHOT: CU (eye-level, profile two-shot via rack angle), ~85mm lens.\nCAMERA: starts rack focus from Polly Ann to John Henry across the pews.\n\nLOCATION: Brush-arbor church and red dirt road, the Carolinas. Modeled on the brush-arbor and pine-board praise houses of the post-Emancipation Carolinas — an open-sided shelter of rough pine slats and a roof of fresh-cut pine boughs, set in a longleaf clearing off a clay road the color of dried blood. Light is the hero: hard Sunday-noon sun slices between boar\nTIME: Hot Sunday\n\nCHARACTERS:\n  - John Henry — monumental Black laborer in his early thirties, granite-jawed, quietly thunderous. Towering, broad-chested Black steel driver born on a Virginia plantation in the 1840s; calm-eyed, quiet, with skillet-sized hands. After Emancipation he follows the railroad camps, becomes the legendary hammer-swinger at Big Bend Tunnel.\n  - Polly Ann — petite, fiery Black woman in her late twenties with a singer's open chest and flashing eyes. John Henry's small, fierce wife with a yellow kerchief, a laugh that fills clearings and a temper that empties them. Mother, singer, and steel driver in her own right.\n\nACTION: Polly Ann's eyes open mid-hymn and find his across the pews. She does not look away. Focus pulls to him; he holds her gaze.\nCOMPOSITION: Heads of congregation soft-blurred between them. Their voices braid on the soundtrack. The look does the work.\nMOOD: Warm, tender, fated\n\nNEGATIVE: no text, no logos, no UI, no watermarks, no illustration.",
+    "meta": {
+      "stage": "first_frame_composition",
+      "scene": "s03_brush_arbor",
+      "shot": "s03_04"
+    }
+  },
+  "frames/s03_brush_arbor/s03_03.png": {
+    "model": "gen4_image",
+    "prompt": "Photorealistic cinematic film still. anamorphic, practical light, teal-and-orange grade, 35mm grain, shallow depth of. Anamorphic 16:9.\nSHOT: MS low, from the aisle floor angle, 35mm.\nLOCATION: Brush-arbor church and red dirt road, the Carolinas, Hot Sunday.\nCHARACTERS: John Henry; Polly Ann\nACTION: From the back row John Henry rises — enormous, broad as a doorframe. His bass answers her line, low as river stone.\nMOOD: Warm, tender, fated\nNEGATIVE: no text, no logos, no watermarks.",
+    "meta": {
+      "stage": "first_frame",
+      "scene": "s03_brush_arbor",
+      "shot": "s03_03"
+    }
+  },
+  "frames/s03_brush_arbor/s03_04.png": {
+    "model": "gen4_image",
+    "prompt": "Photorealistic cinematic film still. anamorphic, practical light, teal-and-orange grade, 35mm grain, shallow depth of. Anamorphic 16:9.\nSHOT: CU eye-level, profile two-shot via rack angle, 85mm.\nLOCATION: Brush-arbor church and red dirt road, the Carolinas, Hot Sunday.\nCHARACTERS: John Henry; Polly Ann\nACTION: Polly Ann's eyes open mid-hymn and find his across the pews. She does not look away. Focus pulls to him; he holds her gaze.\nMOOD: Warm, tender, fated\nNEGATIVE: no text, no logos, no watermarks.",
+    "meta": {
+      "stage": "first_frame",
+      "scene": "s03_brush_arbor",
+      "shot": "s03_04"
+    }
+  },
+  "frames/s03_brush_arbor/s03_05.composition.png": {
+    "model": "gpt_image",
+    "prompt": "VISUAL STYLE: anamorphic, practical light, teal-and-orange grade, 35mm grain, shallow depth of field.\nLENS: Spherical primes on large-format digital (ARRI Alexa 65 or LF) to mimic the grain-and-grandeur of 65mm stock: Panavision Sphero 65 / DNA LF set — 24mm, 29mm, 35mm, 50mm, 75mm, 100mm. Lean heavily on the 35mm and 50mm for waist-up portraiture; reserve the 24mm for landscape vistas and the 100mm for compressed heat-haze montages. Minimal zooms. Glass chosen for gentle field curvature and warm uncoated flares from oil-lamp and lantern practicals..\nGRADE: A warm, earth-pigment palette — oxblood reds, tobacco browns, longleaf-pine greens, and bone-white skies — printed with crushed shadows, creamy highlight rolloff, and a subtle silver-retention bite in the midtones so skin reads like worked leather and iron..\n\nPHOTOREALISTIC CINEMATIC FILM STILL.\n\nSHOT: LS (low, three-quarter rear angle), ~40mm lens.\nCAMERA: starts slow dolly behind them.\n\nLOCATION: Brush-arbor church and red dirt road, the Carolinas. Modeled on the brush-arbor and pine-board praise houses of the post-Emancipation Carolinas — an open-sided shelter of rough pine slats and a roof of fresh-cut pine boughs, set in a longleaf clearing off a clay road the color of dried blood. Light is the hero: hard Sunday-noon sun slices between boar\nTIME: Hot Sunday\n\nCHARACTERS:\n  - John Henry — monumental Black laborer in his early thirties, granite-jawed, quietly thunderous. Towering, broad-chested Black steel driver born on a Virginia plantation in the 1840s; calm-eyed, quiet, with skillet-sized hands. After Emancipation he follows the railroad camps, becomes the legendary hammer-swinger at Big Bend Tunnel.\n  - Polly Ann — petite, fiery Black woman in her late twenties with a singer's open chest and flashing eyes. John Henry's small, fierce wife with a yellow kerchief, a laugh that fills clearings and a temper that empties them. Mother, singer, and steel driver in her own right.\n\nACTION: They walk side by side down a red dirt road. Pine shadows long across the clay. Neither speaks. Her hand brushes his once.\nCOMPOSITION: Golden hour. His silhouette dwarfs hers. Long pine shadows striping the road. Cicadas, no dialogue. The brush of hands is the whole shot.\nMOOD: Warm, tender, fated\n\nNEGATIVE: no text, no logos, no UI, no watermarks, no illustration.",
+    "meta": {
+      "stage": "first_frame_composition",
+      "scene": "s03_brush_arbor",
+      "shot": "s03_05"
+    }
+  },
+  "frames/s03_brush_arbor/s03_06.composition.png": {
+    "model": "gpt_image",
+    "prompt": "VISUAL STYLE: anamorphic, practical light, teal-and-orange grade, 35mm grain, shallow depth of field.\nLENS: Spherical primes on large-format digital (ARRI Alexa 65 or LF) to mimic the grain-and-grandeur of 65mm stock: Panavision Sphero 65 / DNA LF set — 24mm, 29mm, 35mm, 50mm, 75mm, 100mm. Lean heavily on the 35mm and 50mm for waist-up portraiture; reserve the 24mm for landscape vistas and the 100mm for compressed heat-haze montages. Minimal zooms. Glass chosen for gentle field curvature and warm uncoated flares from oil-lamp and lantern practicals..\nGRADE: A warm, earth-pigment palette — oxblood reds, tobacco browns, longleaf-pine greens, and bone-white skies — printed with crushed shadows, creamy highlight rolloff, and a subtle silver-retention bite in the midtones so skin reads like worked leather and iron..\n\nPHOTOREALISTIC CINEMATIC FILM STILL.\n\nSHOT: MS (eye-level, over-shoulder from John Henry angle), ~50mm lens.\nCAMERA: starts static.\n\nLOCATION: Brush-arbor church and red dirt road, the Carolinas. Modeled on the brush-arbor and pine-board praise houses of the post-Emancipation Carolinas — an open-sided shelter of rough pine slats and a roof of fresh-cut pine boughs, set in a longleaf clearing off a clay road the color of dried blood. Light is the hero: hard Sunday-noon sun slices between boar\nTIME: Hot Sunday\n\nCHARACTERS:\n  - John Henry — monumental Black laborer in his early thirties, granite-jawed, quietly thunderous. Towering, broad-chested Black steel driver born on a Virginia plantation in the 1840s; calm-eyed, quiet, with skillet-sized hands. After Emancipation he follows the railroad camps, becomes the legendary hammer-swinger at Big Bend Tunnel.\n  - Polly Ann — petite, fiery Black woman in her late twenties with a singer's open chest and flashing eyes. John Henry's small, fierce wife with a yellow kerchief, a laugh that fills clearings and a temper that empties them. Mother, singer, and steel driver in her own right.\n\nACTION: At the gate Polly Ann stops, turns, studies him a long moment — like measuring timber.\nSPEAKER FOCUS: Polly Ann is the one delivering the line in this shot — frame and light them as the dialogue subject; other characters react or listen.\nCOMPOSITION: His shoulder dark in foreground left. She is small, framed by gate posts. Warm low sun on her face. Beat of silence before the line.\nMOOD: Warm, tender, fated\n\nNEGATIVE: no text, no logos, no UI, no watermarks, no illustration.",
+    "meta": {
+      "stage": "first_frame_composition",
+      "scene": "s03_brush_arbor",
+      "shot": "s03_06"
+    }
+  },
+  "frames/s03_brush_arbor/s03_05.png": {
+    "model": "gen4_image",
+    "prompt": "Photorealistic cinematic film still. anamorphic, practical light, teal-and-orange grade, 35mm grain, shallow depth of. Anamorphic 16:9.\nSHOT: LS low, three-quarter rear angle, 40mm.\nLOCATION: Brush-arbor church and red dirt road, the Carolinas, Hot Sunday.\nCHARACTERS: John Henry; Polly Ann\nACTION: They walk side by side down a red dirt road. Pine shadows long across the clay. Neither speaks. Her hand brushes his once.\nMOOD: Warm, tender, fated\nNEGATIVE: no text, no logos, no watermarks.",
+    "meta": {
+      "stage": "first_frame",
+      "scene": "s03_brush_arbor",
+      "shot": "s03_05"
+    }
+  },
+  "frames/s03_brush_arbor/s03_06.png": {
+    "model": "gen4_image",
+    "prompt": "Photorealistic cinematic film still. anamorphic, practical light, teal-and-orange grade, 35mm grain, shallow depth of. Anamorphic 16:9.\nSHOT: MS eye-level, over-shoulder from John Henry angle, 50mm.\nLOCATION: Brush-arbor church and red dirt road, the Carolinas, Hot Sunday.\nCHARACTERS: John Henry; Polly Ann\nACTION: At the gate Polly Ann stops, turns, studies him a long moment — like measuring timber.\nMOOD: Warm, tender, fated\nNEGATIVE: no text, no logos, no watermarks.",
+    "meta": {
+      "stage": "first_frame",
+      "scene": "s03_brush_arbor",
+      "shot": "s03_06"
+    }
+  }
+}

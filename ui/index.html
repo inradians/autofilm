@@ -511,6 +511,72 @@
     font-family: ui-monospace, monospace;
   }
 
+  /* API events card — surfaces model failures, rejections, exhausted
+     cascades. Lives below the cost card so the user can see at a
+     glance how clean the run was. Border accent uses --warning so it
+     stands out from the cost card without screaming about it. */
+  .apievents {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--warning, #d97706);
+    border-radius: 6px;
+    padding: 12px 16px;
+    margin: 18px 0;
+  }
+  .apievents-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 16px;
+  }
+  .apievents-head h5 {
+    margin: 0; font-size: 10px; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--muted); font-weight: 600;
+  }
+  .apievents-summary {
+    font-size: 12px; color: var(--ink); margin-top: 4px;
+    font-family: ui-monospace, monospace;
+  }
+  .apievents-summary .ev-rejected   { color: #c2410c; }
+  .apievents-summary .ev-failed     { color: #b91c1c; }
+  .apievents-summary .ev-exhausted  { color: #991b1b; font-weight: 600; }
+  .apievents-summary .ev-recovered  { color: #047857; }
+
+  .apievents-details { margin-top: 10px; }
+  .apievents-details summary {
+    color: var(--muted); font-size: 11px; cursor: pointer;
+  }
+  .apievents-details summary:hover { color: var(--ink); }
+  .apievents-list {
+    margin-top: 8px; display: flex; flex-direction: column; gap: 4px;
+  }
+  .apievents-row {
+    display: grid;
+    grid-template-columns: 145px 70px 110px 1fr auto;
+    gap: 10px; align-items: baseline;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 11px; color: var(--ink);
+    padding: 4px 6px; border-radius: 3px;
+    background: rgba(0,0,0,0.02);
+  }
+  .apievents-row .ev-time   { color: var(--muted); }
+  .apievents-row .ev-stage  { color: var(--accent); font-weight: 600; }
+  .apievents-row .ev-model  { color: var(--ink); }
+  .apievents-row .ev-ctx    { color: var(--muted); overflow: hidden;
+                              text-overflow: ellipsis; white-space: nowrap; }
+  .apievents-row .ev-status {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em;
+    padding: 1px 6px; border-radius: 3px;
+  }
+  .apievents-row .ev-status.ev-rejected  { background: #fed7aa; color: #9a3412; }
+  .apievents-row .ev-status.ev-failed    { background: #fecaca; color: #991b1b; }
+  .apievents-row .ev-status.ev-exhausted { background: #991b1b; color: #fff; }
+  .apievents-row .ev-error {
+    grid-column: 1 / -1;
+    color: var(--muted); font-size: 11px;
+    margin-top: 2px; padding-left: 4px;
+    border-left: 2px solid var(--border);
+    white-space: pre-wrap; word-break: break-word;
+  }
+
   details { margin-top: 8px; }
   details summary { cursor: pointer; color: var(--muted); font-size: 12px; }
   details summary:hover { color: var(--ink); }
@@ -550,6 +616,7 @@
       <div class="field">
         <label for="bookPath">…or server-local path</label>
         <input id="bookPath" name="book_path" type="text"
+               value="/Users/camputer/Documents/Code/autofilm/test_data/books/The_Steel_Drivin_Man.pdf"
                placeholder="/path/to/book.pdf" />
       </div>
 
@@ -1213,6 +1280,90 @@ function renderCost(cost) {
   return wrap;
 }
 
+function renderApiEvents(events) {
+  // Filter to the events the user actually cares about — clean
+  // first-try successes are noise here. Keep failed / rejected /
+  // exhausted, plus 'ok' that came AFTER a sibling failure in the
+  // same context (those are the recoveries that show the cascade
+  // working).
+  const failures   = events.filter(e =>
+    e.status === 'failed' || e.status === 'rejected'
+                          || e.status === 'exhausted');
+  if (!failures.length) return null;
+
+  const byContext  = {};
+  for (const e of events) {
+    (byContext[e.context] = byContext[e.context] || []).push(e);
+  }
+  // A "recovery" = a failure for one model in a context followed by
+  // an ok for a different model in the same context. We surface
+  // those alongside failures to tell the story.
+  const recoveries = [];
+  for (const ctx of Object.keys(byContext)) {
+    const evs = byContext[ctx];
+    const hadFail = evs.some(e => e.status === 'failed' || e.status === 'rejected');
+    const okEvent = evs.find(e => e.status === 'ok');
+    if (hadFail && okEvent) recoveries.push(okEvent);
+  }
+
+  const rejected  = failures.filter(e => e.status === 'rejected').length;
+  const failed    = failures.filter(e => e.status === 'failed').length;
+  const exhausted = failures.filter(e => e.status === 'exhausted').length;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'apievents';
+
+  // Header summary row — always visible.
+  const head = document.createElement('div');
+  head.className = 'apievents-head';
+  const bits = [];
+  if (rejected)  bits.push(`<span class="ev-rejected">${rejected} rejected</span>`);
+  if (failed)    bits.push(`<span class="ev-failed">${failed} failed</span>`);
+  if (exhausted) bits.push(`<span class="ev-exhausted">${exhausted} exhausted</span>`);
+  if (recoveries.length)
+    bits.push(`<span class="ev-recovered">${recoveries.length} recovered via fallback</span>`);
+  head.innerHTML = `
+    <div>
+      <h5>api events</h5>
+      <div class="apievents-summary">${bits.join(' · ')}</div>
+    </div>
+  `;
+  wrap.appendChild(head);
+
+  // Details list — collapsible. Stream the failure events first
+  // (chronologically reversed, so newest at the top of the panel).
+  const det = document.createElement('details');
+  det.className = 'apievents-details';
+  const sum = document.createElement('summary');
+  sum.textContent = `${failures.length} event(s) — show details`;
+  det.appendChild(sum);
+
+  const list = document.createElement('div');
+  list.className = 'apievents-list';
+  for (const e of failures) {
+    const row = document.createElement('div');
+    row.className = `apievents-row ev-${e.status}`;
+    const ts = (e.ts || '').replace('T', ' ').replace('Z', '');
+    row.innerHTML =
+      `<span class="ev-time">${ts}</span>` +
+      `<span class="ev-stage">${e.stage}</span>` +
+      `<span class="ev-model">${e.model}</span>` +
+      `<span class="ev-ctx">${e.context || ''}</span>` +
+      `<span class="ev-status ev-${e.status}">${e.status}</span>`;
+    if (e.error) {
+      const errLine = document.createElement('div');
+      errLine.className = 'ev-error';
+      errLine.textContent = e.error;
+      row.appendChild(errLine);
+    }
+    list.appendChild(row);
+  }
+  det.appendChild(list);
+  wrap.appendChild(det);
+
+  return wrap;
+}
+
 function renderExperimentDetail(data, isLive = false) {
   const target = $('mainArea');
   // Render into a child container, leaving #mainEmpty as a sibling
@@ -1308,6 +1459,14 @@ function renderExperimentDetail(data, isLive = false) {
   // Cost breakdown
   if (data.cost && data.cost.n_calls > 0) {
     container.appendChild(renderCost(data.cost));
+  }
+
+  // API events — model failures, rejections, exhausted cascades.
+  // Only shown when there's something interesting to surface
+  // (renderApiEvents returns null when the run was a clean sweep).
+  if (data.api_events && data.api_events.length) {
+    const evts = renderApiEvents(data.api_events);
+    if (evts) container.appendChild(evts);
   }
 
   if (!data.bible || !data.bible.stages) {

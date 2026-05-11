@@ -1,0 +1,54 @@
+[
+  {
+    "slug": "virginia_slave_cabin",
+    "name": "Low Slave Cabin, Virginia",
+    "description": "Inspired by surviving antebellum slave quarters in Tidewater Virginia — a single-room dwelling of hand-hewn pine logs chinked with red clay, a packed dirt floor, and a tin roof patched with flattened cans. A lone kerosene lantern is the only light source, throwing a tight amber pool over a straw-tick mattress while the corners drown in tar-black shadow; rain on tin provides a percussive, almost heartbeat ambience. Surfaces are tactile and rough: splintered rafters hung with drying herbs, a soot-blackened hearth, coarse linen sheets gone gray from lye washing, a tin basin beaded with sweat-water. The palette is candle-amber, ink-black, ember-red, wet-pine brown. Camera-friendly notes: tight, low-ceilinged interior favors close lenses (28–40mm) and chiaroscuro one-light setups; practicals can motivate every beat, and the dark beyond the doorway reads as a pure black void for mythic silhouettes. Lightning flashes outside can punch quick blue counter-key without breaking the lantern world.",
+    "scene_ids": [
+      "s01_birth"
+    ],
+    "color_palette": [
+      "lantern amber",
+      "tar black",
+      "ember red",
+      "wet-pine brown"
+    ],
+    "moodboard_paths": [
+      "the_steel_drivin_man_2/exp_001/location_moodboards/virginia_slave_cabin/00.png"
+    ]
+  },
+  {
+    "slug": "fields_mills_road_montage",
+    "name": "Cotton Fields, Sawmills & Road to the Railroad Camps",
+    "description": "A composite Reconstruction-era Southern landscape drawn from Piedmont cotton country, Carolina pine sawmills, and the rutted clay roads that fed the C&O rail expansion. Light is wide and unforgiving: a high, bleaching noon sun over the cotton rows, then dust-filtered God-rays slanting through a sawmill's open-sided shed, finally a hazy late-afternoon orange where coal smoke from distant camps smudges the horizon. Materials shift across the montage — cotton bolls like dirty popcorn, hand-split cypress shingles, rough oak axe handles polished by palm sweat, a rusted cider barrel sweating sap, the iron-and-coal grit of the road. The palette runs sun-bleached white, cotton-cream, sawdust-gold, iron-rust, distant-smoke blue. Camera-friendly notes: built for sweeping wides and long-lens heat-shimmer compressions; a slow dolly past sawmill blades, backlit dust, and a hero crossroads tableau with John Henry centered against converging horizons make natural montage punctuation. Wind in the cotton and floating sawdust give every frame organic motion.",
+    "scene_ids": [
+      "s02_growing_up"
+    ],
+    "color_palette": [
+      "sun-bleached white",
+      "sawdust gold",
+      "iron rust",
+      "smoke blue"
+    ],
+    "moodboard_paths": [
+      "the_steel_drivin_man_2/exp_001/location_moodboards/fields_mills_road_montage/00.png"
+    ]
+  },
+  {
+    "slug": "brush_arbor_and_red_road",
+    "name": "Brush-Arbor Church & Red Dirt Road, the Carolinas",
+    "description": "Modeled on the brush-arbor and pine-board praise houses of the post-Emancipation Carolinas — an open-sided shelter of rough pine slats and a roof of fresh-cut pine boughs, set in a longleaf clearing off a clay road the color of dried blood. Light is the hero: hard Sunday-noon sun slices between board gaps in clean parallel blades, raking the swaying congregation with stripes of gold and shadow and lighting suspended motes of pollen and dust. Surfaces smell as much as they look — turpentine weeping from green pine, sweat-darkened hat brims, hymnal paper soft as cloth, hand-stitched yellow kerchief, the iron hinge of a weather-silvered gate. Outside, the red dirt road glows terracotta between walls of loblolly pine whose long late shadows stripe the lovers as they walk. Palette: pine-sap gold, kerchief yellow, clay red, shadow indigo, Sunday white. Camera-friendly notes: the slatted walls are a natural cucoloris for in-camera god-rays; shoot the duet in matched singles with shallow depth to braid the voices visually, then transition to a wide two-shot on the road using the pine-shadow bars as a built-in rhythm track. Golden hour on the clay road needs almost no augmentation.",
+    "scene_ids": [
+      "s03_brush_arbor"
+    ],
+    "color_palette": [
+      "pine-sap gold",
+      "clay red",
+      "kerchief yellow",
+      "shadow indigo",
+      "Sunday white"
+    ],
+    "moodboard_paths": [
+      "the_steel_drivin_man_2/exp_001/location_moodboards/brush_arbor_and_red_road/00.png"
+    ]
+  }
+]

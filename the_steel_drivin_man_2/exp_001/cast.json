@@ -1,0 +1,26 @@
+[
+  {
+    "character_id": "john_henry",
+    "actor": "monumental Black laborer in his early thirties, granite-jawed, quietly thunderous",
+    "alternative": "soft-spoken Black powerlifter-type, 6'6\", with weathered farmhand hands",
+    "rationale": "John Henry needs sheer physical scale paired with a low, unhurried gravity. The archetype emphasizes calm eyes and a watchful, almost gentle stillness that contrasts with his colossal strength — a man who lets his hammer do the talking."
+  },
+  {
+    "character_id": "polly_ann",
+    "actor": "petite, fiery Black woman in her late twenties with a singer's open chest and flashing eyes",
+    "alternative": "wiry Black field-singer in her early thirties, head wrapped in bright cloth, bold-voiced",
+    "rationale": "Polly Ann is small but seismic — laughter, temper, and capability all packed tight. The archetype foregrounds vocal warmth and a coiled physicality so she's believable both as tender partner and as a woman who could swing a nine-pound hammer."
+  },
+  {
+    "character_id": "midwife",
+    "actor": "stout Black elder woman in her sixties, apron-creased, unflappable register",
+    "alternative": "lean, gray-templed Black countrywoman with capable, root-doctor hands",
+    "rationale": "A brief but rooted presence: the midwife should read as someone who has caught a hundred babies. The archetype carries weary competence and a quiet, matter-of-fact wisdom in a single gesture — wiping her hands on her apron."
+  },
+  {
+    "character_id": "john_henrys_mother",
+    "actor": "slender Black woman in her early twenties, firelit, tender but iron-spined",
+    "alternative": "young Black mother with deep-set eyes and a low, hymn-trained voice",
+    "rationale": "She has walked the long road between plantations and still holds prophecy in her arms. The archetype balances youthful vulnerability with the inward strength of an enslaved woman who has already endured much — luminous in firelight, steady when her infant speaks the future."
+  }
+]
