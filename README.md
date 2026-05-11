@@ -1,12 +1,26 @@
 # autofilm
 
-*One day, films were made by meat computers in coordinated rituals called "shoots". They synchronized over multi-month schedules, eating craft service and arguing about lens choice. That era is fading. Films are now drafted by autonomous swarms of AI agents iterating overnight against a single critic-derived scalar. The agents claim we are now in the 47th iteration of the look book; in any case the production designer has been replaced by a markdown file. This repo is one of the first ones.*
+*One day, films were made by meat machines using bulky equipment in coordinated rituals called "shoots". They synchronized over multi-month schedules, eating craft service and arguing about lens choice. That era is fading. Films are now drafted by autonomous swarms of AI agents iterating overnight against a single critic-derived scalar. The agents claim we are now in the 47th iteration of the look book; in any case the production designer has been replaced by a markdown file. This repo is one of the first ones.*
 
-The idea: give an AI agent a small but real virtual-production setup and let it experiment autonomously. It edits the creative parameters, runs the full pipeline (book → screenplay → cast → look book → storyboard → frames → video → edit → final mix), gets a critic-derived `film_loss` score, keeps or discards changes, and repeats. You wake up to a log of experiments and (hopefully) a better short film.
+**Core Idea:** Give an AI agent a small but real virtual-production setup and let it experiment autonomously. It edits the creative parameters, runs the full pipeline (book → screenplay → cast → look book → storyboard → frames → video → edit → final mix), gets a critic-derived `film_loss` score, keeps or discards changes, and repeats. You wake up to a log of experiments and (hopefully) a better short film.
+
+**Inspiration:** The scaffolding split and the overnight optimize-against-a-scalar loop are shaped after [Andrej Karpathy’s **autoresearch**](https://github.com/karpathy/autoresearch). Separately, Larry Ellison—reflecting on Steve Jobs in interviews such as [this **Macworld** piece](https://www.macworld.com/article/669662/larry-ellison-on-steve-jobs-personality-successes-and-failures.html)—described Jobs at Pixar obsessively critiquing iteration after iteration of *Toy Story* until the cut was worth shipping. Here, `evaluate.py` and `film_loss` stand in for that relentless review pass.
 
 The pipeline runs on the SOTA May-2026 stack, **consolidated through Runway**: a single Runway API key replaces what used to be four separate provider integrations (OpenAI for GPT Image 2, Google AI for Nano Banana 2 + Veo 3.1, ElevenLabs for SFX). Anthropic for Claude Opus 4.7 and Stability for Stable Audio 2.5 are kept on direct APIs. Total: **3 keys instead of 5**, **0 approval delays instead of 2** (no more OpenAI org verification or Google Cloud billing for video).
 
+**Bundled default book — *The Steel Driving Man*:** The repo ships an **AI-generated** PDF ([`test_data/books/The_Steel_Drivin_Man.pdf`](test_data/books/The_Steel_Drivin_Man.pdf)) so experiments start from **original text** instead of third‑party intellectual property. It retells the folk legend of **John Henry** and his attempt to **outpace a steel-driving machine** (steam drill). In the tale John Henry pits hammer muscle against automation—often framed as both heroic triumph and **fatal cost**, because proving humanity still wins can break the human doing it. That clash doubles here as a loose metaphor for **creative flesh‑and‑blood oversight versus tireless algorithmic iteration**—without implying whether storytellers or models ought to "win." Use it as the default by setting **`BOOK_PDF_PATH`** to that file (absolute path in `.env` is safest):
+
+```bash
+BOOK_PDF_PATH=/absolute/path/to/autofilm/test_data/books/The_Steel_Drivin_Man.pdf
+```
+
+Swap in any other extractable PDF by changing **`BOOK_PDF_PATH`**; outputs go under `experiments/{book_slug}/exp_NNN/` (for this PDF the slug is **`the_steel_drivin_man`**).
+
 ## How it works
+
+End-to-end flow from book PDF through **`final.mp4`**, critic scoring, and autoresearch carryover. Diagram source: [`docs/autofilm_pipeline_horizontal.svg`](docs/autofilm_pipeline_horizontal.svg).
+
+![Autofilm pipeline diagram: book PDF → parse → cast and locations → lookbook → storyboard → render → compile → final.mp4 → evaluate → carryover, looping back for the next iteration](docs/autofilm_pipeline_horizontal.svg)
 
 The repo deliberately has only three files that matter:
 
@@ -18,38 +32,70 @@ By design, each experiment runs on a **fixed scene budget** (`MAX_SCENES=3` by d
 
 ## Quick start
 
-**First time?** Read [`SETUP.md`](SETUP.md) — three keys, no approval delays, ~15 minutes to a green setup-check.
+Install, API keys, book PDF, `check_setup.py`, and a cost-aware first `produce.py` / `evaluate.py` run are in **[SETUP.md](SETUP.md)** (sections 1–8). Optional browser UI (Flask): section **8b**.
 
-Once you've completed setup:
+## Running a full job (CLI)
+
+Point the pipeline at one PDF via **`BOOK_PDF_PATH`** (in `.env` or exported in your shell). The intended default is **[`test_data/books/The_Steel_Drivin_Man.pdf`](test_data/books/The_Steel_Drivin_Man.pdf)** (*The Steel Driving Man*). Other common env knobs: **`MAX_SCENES`** (default 3), **`DIRECTOR`** / **`CINEMATOGRAPHER`**, **`SEED`** (integer, reproducibility), **`FORCE_NEW=1`** (start a fresh `exp_NNN` instead of resuming).
+
+### One full pipeline pass (single experiment)
+
+[`produce.py`](produce.py) runs the full chain once—script through final mix—for the current or new experiment under `experiments/{book_slug}/exp_NNN/`. It resumes automatically if that directory already has partial artifacts.
 
 ```bash
-# Verify keys + ffmpeg + book pdf (well under a cent, ~10 sec)
-python scripts/check_setup.py
-
-# Run a cheap first experiment (~$5-7, ~10 min)
-MAX_SCENES=1 uv run produce.py
-
-# Score it (the bible PDF rebuilds with the critique section)
-uv run evaluate.py latest
-
-# Inspect (paths are now per-book: experiments/{book_slug}/exp_NNN/)
-open experiments/jurassic_park/exp_001/bible.pdf
-cat experiments/jurassic_park/exp_001/critique.md
+export BOOK_PDF_PATH="$PWD/test_data/books/The_Steel_Drivin_Man.pdf"
+MAX_SCENES=3 uv run produce.py
 ```
 
-Once that loop confirms end-to-end, drop `MAX_SCENES=1` for the default 3-scene runs (~$27 each).
+That writes **`final.mp4`**, **`production_bible.json`**, and **`bible.pdf`**. To run the critic and refresh artifacts with **`metric.json`**, **`critique.md`**, and an updated bible:
 
-## Test books
+```bash
+uv run evaluate.py latest
+# or: uv run evaluate.py the_steel_drivin_man/exp_001
+```
 
-The pipeline targets a single source PDF at a time, set via `BOOK_PDF_PATH` in `.env`. Three deliberately-different books in the test set, each chosen to stress a different axis of the pipeline:
+### Autoresearch loop (produce → evaluate → iterate)
 
-| Book | Author, year | Why it's in the set | Wikipedia |
-|---|---|---|---|
-| **Jurassic Park** *(default)* | Michael Crichton, 1991 | Dialogue-heavy thriller with discrete locations, a manageable cast, and clean narrative beats — the easy mode of the three. Stresses **continuity** (re-use of locations and characters across scenes) and **fidelity** (the book's set-pieces are well-known, so deviations are obvious). | [link](https://en.wikipedia.org/wiki/Jurassic_Park) |
-| **Last Exit to Brooklyn** | Hubert Selby Jr., 1964 | Episodic, transgressive, low-incident, written without conventional punctuation. Stresses **acting** (much of the book is interior monologue rendered as fragmented dialogue) and **cinematography** (locations are bleak and similar — the look book has to do real work). |  [link](https://en.wikipedia.org/wiki/Last_Exit_to_Brooklyn) |
-| **The Electric Kool-Aid Acid Test** | Tom Wolfe, 1968 | New Journalism, non-linear, drug-addled, second-person digressions. Stresses **fidelity** (Wolfe's voice is the book — losing it loses everything) and **sound** (the music cue and ambient layer carry a lot of the period feel). | [link](https://en.wikipedia.org/wiki/The_Electric_Kool-Aid_Acid_Test) |
+[`run_loop.py`](run_loop.py) runs the closed loop: full **`produce`** pass → **`evaluate_film`** → carryover plan → next **`exp_`** directory → repeat until a stop condition hits.
 
-**We will use Jurassic Park first.** It's already the default `BOOK_PDF_PATH`. Drop the PDF at `/mnt/user-data/uploads/JurassicPark-MichaelCrichton.pdf` (or override the env var) and you're ready to run. The other two are for the second and third experiment runs once the pipeline is dialed in.
+```bash
+export BOOK_PDF_PATH="$PWD/test_data/books/The_Steel_Drivin_Man.pdf"
+MAX_SCENES=3 uv run run_loop.py --iterations 5
+```
+
+Useful flags:
+
+| Flag | Meaning |
+|------|--------|
+| `--iterations N` | Cap on loop iterations (default 3) |
+| `--target 0.15` | Stop when `film_loss` ≤ this (default 0.15) |
+| `--threshold {low,medium,high}` | How aggressively to apply critic “changes” (default `medium`) |
+| `--resume` | Continue from the latest experiment instead of starting a new chain |
+| `--plateau` / `--plateau-window` | Stop when improvement stalls |
+
+Print a leaderboard of scored experiments and exit:
+
+```bash
+uv run run_loop.py --history
+```
+
+## Web UI server
+
+[`ui_server.py`](ui_server.py) is a small **Flask** app that configures a run in the browser and **starts the same autoresearch loop** as `run_loop.py` in a background subprocess (so the server stays responsive while logs stream). **Install Flask and launch the server** using **[SETUP.md](SETUP.md)** section **8b**.
+
+Default URL **`http://127.0.0.1:5174`** (override with **`AUTOFILM_UI_HOST`** / **`AUTOFILM_UI_PORT`**). In the UI you can:
+
+- Set a **server-local PDF path** or **upload** a book PDF (uploads land under `~/.autofilm/uploads/`).
+- Set **iterations**, **target loss**, critic **threshold**, **`max_scenes`**, optional **director / cinematographer**, **seed**, and optional **moodboard** images (saved under `experiments/{book_slug}/user_moodboards/` for the look book stage).
+- **Start** / **Stop** the loop (stop sends SIGTERM to the subprocess).
+- Run the **API smoke test** (`scripts/api_smoke_test.py`) before an expensive job.
+- Pick past experiments from the sidebar to reload saved **`run_config.json`** defaults.
+
+The UI polls **`/api/state`** for live log tail and parsed stage progress. For a one-off single render without the loop, use the CLI **`produce.py`** path above; the UI is aimed at multi-iteration **`run_loop.py`** jobs.
+
+## Bundled source book
+
+The default corpus is **[`test_data/books/The_Steel_Drivin_Man.pdf`](test_data/books/The_Steel_Drivin_Man.pdf)** (*The Steel Driving Man*): **AI-generated** prose about **John Henry** and his race against a **steel-driving machine**, included so development and demos avoid copyrighted third‑party novels. Set **`BOOK_PDF_PATH`** to that path (or upload another PDF in the web UI). Any text-extractable PDF you have rights to use is fine.
 
 ## Running the agent
 
@@ -84,25 +130,33 @@ Switch via `VEO_TIER=fast | standard | gen4.5 | seedance2 | previs` in `.env`, o
 
 ## Project structure
 
+Generated runs write under `experiments/{book_slug}/exp_NNN/`. That directory is **gitignored** so clones stay small; paths below describe what appears on disk after you run the pipeline.
+
 ```
 prepare.py        — fixed scaffolding (do not modify)
 produce.py        — full pipeline + creative knobs (agent modifies this)
+run_loop.py       — autoresearch loop (produce → evaluate → carryover → repeat)
 evaluate.py       — runs the critic over a finished film
 bible.py          — generates a production-bible PDF for an experiment
+ui_server.py      — Flask UI; spawns run_loop.py with form-defined env/settings
 program.md        — agent instructions (human modifies this)
 SETUP.md          — first-time setup walkthrough (read this first)
 CHANGELOG.md      — migration history
 README.md         — this file
 .env.example      — required API keys + optional creative direction
 pyproject.toml    — dependencies
+test_data/
+  books/The_Steel_Drivin_Man.pdf    — default AI-generated John Henry source (IP-safe)
+docs/
+  autofilm_pipeline_horizontal.svg  — pipeline diagram (embedded above)
 scripts/
   check_setup.py  — verifies keys, ffmpeg, and book PDF before a run
 .claude/skills/   — vendored Runway skills (auto-discovered by Claude Code)
 experiments/
-  jurassic_park/
+  the_steel_drivin_man/
     exp_001/
       produce.py    ← snapshot of what produced this run
-      book.txt      ← book slug ("jurassic_park")
+      book.txt      ← book slug ("the_steel_drivin_man")
       script.json
       cast.json
       locations.json
@@ -120,9 +174,6 @@ experiments/
       bible.pdf     ← single-document production reference for this version
     exp_002/
       ...
-  last_exit_to_brooklyn/
-    exp_001/
-      ...
   _smoke_tests/     ← Runway SDK validation outputs (scripts/runway_smoke_test.py)
     20260508_214500/
       gpt_image.png, veo.mp4, summary.md
@@ -139,28 +190,9 @@ experiments/
 - **Self-contained scaffolding.** No managed orchestration framework, no DAG library, no message bus. One sequential pipeline, one metric, one editable file.
 - **One billing surface for media.** Everything image/video/SFX runs through Runway credits. The agent doesn't have to reason about quota across four different vendor dashboards.
 
-## API keys
-
-Three required, one optional:
-
-1. **`ANTHROPIC_API_KEY`** — Claude Opus 4.7
-2. **`RUNWAYML_API_SECRET`** — image, video, and SFX
-3. **`STABILITY_API_KEY`** — Stable Audio 2.5
-4. **`GOOGLE_AI_API_KEY`** — *optional*, only for the long-video critic
-
-See [`SETUP.md`](SETUP.md) for the per-provider walkthrough.
-
 ## Optional creative direction
 
-You can name a real working director and/or cinematographer whose body of work should bias the look book:
-
-```bash
-DIRECTOR="..." CINEMATOGRAPHER="..." python produce.py
-```
-
-When set, the look book stage takes those names as input and asks Claude to derive concrete craft markers — typical lens package, lighting approach, palette, framing patterns, camera-movement vocabulary — and bake them into `lookbook.json`. The downstream Veo prompts use those derived markers (not the names themselves), and the bible cover shows the credits.
-
-Leave them unset for the pipeline's neutral cinematic baseline. The default `LOOKBOOK_GRADE` and `LOOKBOOK_STYLE_KEYWORDS` in `produce.py` already define a workable starting point.
+Optional **`DIRECTOR`** / **`CINEMATOGRAPHER`** env vars bias the look book toward a real filmmaker’s craft vocabulary (derived markers land in `lookbook.json` and credits on the bible cover). See **[SETUP.md](SETUP.md)** section **5**. Leave unset for the neutral baseline already defined by `LOOKBOOK_GRADE` / `LOOKBOOK_STYLE_KEYWORDS` in `produce.py`.
 
 ## Shot routing
 
